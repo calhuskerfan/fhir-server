@@ -21,6 +21,8 @@ using System.Runtime.CompilerServices;
 
 [assembly: InternalsVisibleTo("Microsoft.Health.Fhir.CosmosDb")]
 [assembly: InternalsVisibleTo("Microsoft.Health.Fhir.SqlServer")]
+[assembly: InternalsVisibleTo("Microsoft.Health.Fhir.MongoDb")]
+
 [assembly: InternalsVisibleTo("Microsoft.Health.Fhir.Api")]
 [assembly: InternalsVisibleTo("Microsoft.Health.Fhir.Stu3.Api")]
 [assembly: InternalsVisibleTo("Microsoft.Health.Fhir.R4.Api")]
@@ -39,6 +41,8 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("Microsoft.Health.Fhir.R5.Tests.Integration")]
 
 [assembly: InternalsVisibleTo("Microsoft.Health.Fhir.CosmosDb.UnitTests")]
+[assembly: InternalsVisibleTo("Microsoft.Health.Fhir.MongoDb.UnitTests")]
+
 [assembly: InternalsVisibleTo("Microsoft.Health.Fhir.Core.UnitTests")]
 [assembly: InternalsVisibleTo("Microsoft.Health.Fhir.Shared.Core.UnitTests")]
 [assembly: InternalsVisibleTo("Microsoft.Health.Fhir.Tests.Common")]
