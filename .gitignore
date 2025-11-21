@@ -298,3 +298,11 @@ __*
 
 # For our Mac friends
 .DS_Store
+
+
+################################## START DO NOT MERGE CALHUSKERFAN
+*.user.md
+*.user.ps1
+*.user.slnf
+.user/*
+################################## END DO NOT MERGE CALHUSKERFAN

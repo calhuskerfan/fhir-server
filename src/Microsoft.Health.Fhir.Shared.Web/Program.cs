@@ -34,6 +34,10 @@ namespace Microsoft.Health.Fhir.Web
                     }
 
                     builder.AddDevelopmentAuthEnvironmentIfConfigured(builtConfig);
+
+                    // REVIEWCJH: Was seeing errors from launchsettings with
+                    // "FhirServer:Security:Enabled": "false"
+                    builder.AddEnvironmentVariables();
                 })
                 .UseStartup<Startup>()
                 .Build();

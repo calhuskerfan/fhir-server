@@ -117,6 +117,10 @@ namespace Microsoft.Health.Fhir.Web
                 });
                 services.Configure<SqlRetryServiceOptions>(Configuration.GetSection(SqlRetryServiceOptions.SqlServer));
             }
+            else if (runtimeConfiguration is MongoDbRuntimeConfiguration)
+            {
+                fhirServerBuilder.AddMongoDb();
+            }
         }
 
         private IFhirRuntimeConfiguration AddRuntimeConfiguration(IConfiguration configuration, IFhirServerBuilder fhirServerBuilder)
@@ -131,6 +135,10 @@ namespace Microsoft.Health.Fhir.Web
             else if (KnownDataStores.IsSqlServerDataStore(dataStore))
             {
                 runtimeConfiguration = new AzureHealthDataServicesRuntimeConfiguration();
+            }
+            else if (KnownDataStores.IsMongoDbDataStore(dataStore))
+            {
+                runtimeConfiguration = new MongoDbRuntimeConfiguration();
             }
             else
             {
