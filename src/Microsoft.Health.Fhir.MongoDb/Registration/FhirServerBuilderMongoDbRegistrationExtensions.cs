@@ -25,6 +25,7 @@ using Microsoft.Health.Fhir.MongoDb.Configs;
 using Microsoft.Health.Fhir.MongoDb.Features.Health;
 using Microsoft.Health.Fhir.MongoDb.Features.Operations.Export;
 using Microsoft.Health.Fhir.MongoDb.Features.Search;
+using Microsoft.Health.Fhir.MongoDb.Features.Search.Expressions;
 using Microsoft.Health.Fhir.MongoDb.Features.Search.Queries;
 using Microsoft.Health.Fhir.MongoDb.Features.Storage;
 using Microsoft.Health.Fhir.MongoDb.Features.Storage.Queues;
@@ -47,9 +48,10 @@ namespace Microsoft.Extensions.DependencyInjection
 
             IServiceCollection services = fhirServerBuilder.Services;
 
-            services.Add<CompartmentSearchRewriter>()
+            services.Add<MongoDbCompartmentSearchRewriter>()
                 .Singleton()
-                .AsSelf();
+                .AsSelf()
+                .AsService<CompartmentSearchRewriter>();
 
             services.Add<SmartCompartmentSearchRewriter>()
                             .Singleton()
