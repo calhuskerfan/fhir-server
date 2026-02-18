@@ -4,6 +4,7 @@
 // -------------------------------------------------------------------------------------------------
 
 using System;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using EnsureThat;
@@ -44,7 +45,7 @@ namespace Microsoft.Health.Fhir.Core.Features.Search.Registry
             _coreFeatureConfiguration = EnsureArg.IsNotNull(coreFeatureConfiguration, nameof(coreFeatureConfiguration));
             _logger = EnsureArg.IsNotNull(logger, nameof(logger));
 
-            // Get refresh interval from configuration (default 60 seconds, minimum 1 second)
+            // Get refresh interval from configuration (default 20 seconds, minimum 1 second)
             var refreshIntervalSeconds = Math.Max(1, _coreFeatureConfiguration.Value.SearchParameterCacheRefreshIntervalSeconds);
             _refreshInterval = TimeSpan.FromSeconds(refreshIntervalSeconds);
 
@@ -116,35 +117,9 @@ namespace Microsoft.Health.Fhir.Core.Features.Search.Registry
 
             try
             {
-                _logger.LogDebug("Starting SearchParameter cache freshness check.");
-
-                // First check if cache is stale using efficient database query
-                bool cacheIsStale = await _searchParameterStatusManager.EnsureCacheFreshnessAsync(_stoppingToken);
-
-                // Check again if shutdown was requested after the async call
-                if (_stoppingToken.IsCancellationRequested)
-                {
-                    _logger.LogDebug("SearchParameter cache refresh was cancelled during freshness check.");
-                    return;
-                }
-
-                if (cacheIsStale)
-                {
-                    _logger.LogInformation("SearchParameter cache is stale. Performing full SearchParameter synchronization.");
-
-                    // Cache is stale - perform full SearchParameter lifecycle management
-                    await _searchParameterOperations.GetAndApplySearchParameterUpdates(_stoppingToken);
-
-                    // Check one more time if shutdown was requested after the async call
-                    if (!_stoppingToken.IsCancellationRequested)
-                    {
-                        _logger.LogInformation("SearchParameter cache refresh completed successfully.");
-                    }
-                }
-                else
-                {
-                    _logger.LogDebug("SearchParameter cache is up to date. No refresh needed.");
-                }
+                _logger.LogInformation("Performing incremental SearchParameter cache refresh...");
+                await _searchParameterOperations.GetAndApplySearchParameterUpdates(_stoppingToken, false);
+                _logger.LogInformation("Completed incremental SearchParameter cache refresh.");
             }
             catch (OperationCanceledException)
             {
@@ -176,8 +151,25 @@ namespace Microsoft.Health.Fhir.Core.Features.Search.Registry
             // Only start the timer if the service hasn't been cancelled
             if (!_stoppingToken.IsCancellationRequested)
             {
-                // Start the timer now that search parameters are initialized
-                _refreshTimer.Change(TimeSpan.Zero, _refreshInterval);
+                // Add random initial delay to stagger first refresh across instances
+                // This prevents thundering herd problem when multiple pods start simultaneously
+                var maxInitialDelaySeconds = Math.Max(0, _coreFeatureConfiguration.Value.SearchParameterCacheRefreshMaxInitialDelaySeconds);
+                var randomInitialDelaySeconds = maxInitialDelaySeconds > 0
+                    ? RandomNumberGenerator.GetInt32(0, maxInitialDelaySeconds + 1)
+                    : 0;
+                var initialDelay = TimeSpan.FromSeconds(randomInitialDelaySeconds);
+
+                if (randomInitialDelaySeconds > 0)
+                {
+                    _logger.LogInformation("Starting cache refresh timer with {InitialDelay} initial delay to stagger instance startup.", initialDelay);
+                }
+                else
+                {
+                    _logger.LogInformation("Starting cache refresh timer immediately (no initial delay configured).");
+                }
+
+                // Start the timer with random initial delay, then use regular refresh interval
+                _refreshTimer.Change(initialDelay, _refreshInterval);
             }
 
             await Task.CompletedTask;

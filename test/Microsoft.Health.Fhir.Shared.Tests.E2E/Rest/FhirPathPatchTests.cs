@@ -7,6 +7,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using Hl7.Fhir.ElementModel;
 using Hl7.Fhir.Model;
 using Hl7.Fhir.Rest;
@@ -81,7 +82,7 @@ namespace Microsoft.Health.Fhir.Tests.E2E.Rest
             Assert.Equal(OperationOutcome.IssueType.Invalid, responseObject.Issue[0].Code);
         }
 
-        [SkippableFact(Skip = "This test is skipped for STU3.")]
+        [SkippableFact]
         [Trait(Traits.Priority, Priority.One)]
         public async Task GivenAPatchDocument_WhenSubmittingAParallelBundleWithDuplicatedPatch_ThenServerShouldReturnAnError()
         {
@@ -109,10 +110,9 @@ namespace Microsoft.Health.Fhir.Tests.E2E.Rest
             }
         }
 
-        [SkippableTheory(Skip = "This test is skipped for STU3.")]
+        [SkippableTheory]
         [Trait(Traits.Priority, Priority.One)]
-        [InlineData(FhirBundleProcessingLogic.Parallel)]
-        [InlineData(FhirBundleProcessingLogic.Sequential)]
+        [InlineData(FhirBundleProcessingLogic.Sequential)] // Parallel logic will execute in a random order, and thus is not suitable for this test
         public async Task GivenAPatchDocument_WhenSubmittingABundleWithFhirPatch_ThenServerShouldPatchCorrectly(FhirBundleProcessingLogic processingLogic)
         {
             Skip.If(ModelInfoProvider.Version == FhirSpecification.Stu3, "Patch isn't supported in Bundles by STU3");
@@ -476,12 +476,13 @@ namespace Microsoft.Health.Fhir.Tests.E2E.Rest
             await Assert.ThrowsAsync<FhirClientException>(() => _client.FhirPatchAsync(response.Resource, patchRequest));
         }
 
-        [SkippableFact(Skip = "This test is skipped for STU3.")]
+        [Theory]
         [Trait(Traits.Priority, Priority.One)]
-        public async Task GivenAServerThatSupportsIt_WhenPatchingOnlyMetaTag_ThenServerShouldCreateNewVersionAndPreserveHistory()
+        [InlineData(true)]
+        [InlineData(false)]
+        [HttpIntegrationFixtureArgumentSets(DataStore.SqlServer)]
+        public async Task GivenAServerThatSupportsIt_WhenPatchingOnlyMetaTag_ThenServerHonorsMetaHistoryParameter(bool metaHistory)
         {
-            Skip.If(ModelInfoProvider.Version == FhirSpecification.Stu3, "Patch isn't supported in Bundles by STU3");
-
             // Create initial patient resource
             var poco = Samples.GetDefaultPatient().ToPoco<Patient>();
             FhirResponse<Patient> createResponse = await _client.CreateAsync(poco);
@@ -508,7 +509,8 @@ namespace Microsoft.Health.Fhir.Tests.E2E.Rest
             using FhirResponse<Patient> patchResponse = await _client.FhirPatchAsync(
                 createResponse.Resource,
                 patchRequest,
-                ifMatchVersion: initialVersionId);
+                ifMatchVersion: initialVersionId,
+                metaHistory: metaHistory);
 
             // Verify patch was successful
             Assert.Equal(HttpStatusCode.OK, patchResponse.Response.StatusCode);
@@ -529,26 +531,43 @@ namespace Microsoft.Health.Fhir.Tests.E2E.Rest
                 patientId);
 
             Assert.NotNull(historyResponse.Resource);
-            Assert.True(
+            if (metaHistory)
+            {
+                Assert.True(
                 historyResponse.Resource.Entry.Count >= 2,
                 $"Expected at least 2 history entries, but found {historyResponse.Resource.Entry.Count}");
+            }
+            else
+            {
+                Assert.True(
+                historyResponse.Resource.Entry.Count == 1,
+                $"Expected at 1 history entry, but found {historyResponse.Resource.Entry.Count}");
+            }
 
-            // Verify version 1 exists in history
+            // Verify version 1's state in history
             var version1Entry = historyResponse.Resource.Entry.FirstOrDefault(e =>
-                e.Resource is Patient p && p.Meta.VersionId == "1");
-            Assert.NotNull(version1Entry);
+            e.Resource is Patient p && p.Meta.VersionId == "1");
+
+            if (metaHistory)
+            {
+                Assert.NotNull(version1Entry);
+
+                // Verify version 1 doesn't have the tag
+                var version1Patient = version1Entry.Resource as Patient;
+                var version1Tag = version1Patient?.Meta.Tag?.FirstOrDefault(t =>
+                    t.System == "ORGANIZATION_ID" &&
+                    t.Code == "fhirLegalEntityId");
+                Assert.Null(version1Tag);
+            }
+            else
+            {
+                Assert.Null(version1Entry);
+            }
 
             // Verify version 2 exists in history
             var version2Entry = historyResponse.Resource.Entry.FirstOrDefault(e =>
-                e.Resource is Patient p && p.Meta.VersionId == "2");
+            e.Resource is Patient p && p.Meta.VersionId == "2");
             Assert.NotNull(version2Entry);
-
-            // Verify version 1 doesn't have the tag
-            var version1Patient = version1Entry.Resource as Patient;
-            var version1Tag = version1Patient?.Meta.Tag?.FirstOrDefault(t =>
-                t.System == "ORGANIZATION_ID" &&
-                t.Code == "fhirLegalEntityId");
-            Assert.Null(version1Tag);
 
             // Verify version 2 has the tag
             var version2Patient = version2Entry.Resource as Patient;
@@ -591,7 +610,7 @@ namespace Microsoft.Health.Fhir.Tests.E2E.Rest
             Assert.Equal(HttpStatusCode.PreconditionFailed, exception.Response.StatusCode);
         }
 
-        [SkippableFact(Skip = "This test is skipped for STU3.")]
+        [SkippableFact]
         [Trait(Traits.Priority, Priority.One)]
         public async Task GivenAServerThatSupportsIt_WhenPatchingMetaTagMultipleTimes_ThenAllVersionsShouldBeInHistory()
         {
@@ -674,6 +693,18 @@ namespace Microsoft.Health.Fhir.Tests.E2E.Rest
             Assert.Equal(2, version3.Meta.Tag.Count(t => t.System == "ORGANIZATION_ID"));
             Assert.NotNull(version3.Meta.Tag.FirstOrDefault(t => t.Code == "tag1"));
             Assert.NotNull(version3.Meta.Tag.FirstOrDefault(t => t.Code == "tag2"));
+        }
+
+        [Fact]
+        public async Task GivenPatchFhirRequestWithEmptyBody_WhenInvoked_ThenReturnsBadRequest()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Patch, "Patient/example");
+            request.Content = new StringContent(string.Empty); // Empty body
+            request.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/fhir+json");
+
+            var response = await _client.HttpClient.SendAsync(request);
+
+            Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         }
     }
 }

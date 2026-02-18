@@ -31,6 +31,7 @@ namespace Microsoft.Health.Fhir.Core.Features.Search.Parameters
         private readonly IDataStoreSearchParameterValidator _dataStoreSearchParameterValidator;
         private readonly Func<IScoped<ISearchService>> _searchServiceFactory;
         private readonly ILogger _logger;
+        private DateTimeOffset? _searchParamLastUpdated;
 
         public SearchParameterOperations(
             SearchParameterStatusManager searchParameterStatusManager,
@@ -57,6 +58,8 @@ namespace Microsoft.Health.Fhir.Core.Features.Search.Parameters
             _searchServiceFactory = searchServiceFactory;
             _logger = logger;
         }
+
+        public DateTimeOffset? SearchParamLastUpdated => _searchParamLastUpdated;
 
         public string GetResourceTypeSearchParameterHashMap(string resourceType)
         {
@@ -285,30 +288,35 @@ namespace Microsoft.Health.Fhir.Core.Features.Search.Parameters
         /// It should also be called when a user starts a reindex job
         /// </summary>
         /// <param name="cancellationToken">Cancellation token</param>
+        /// <param name="forceFullRefresh">When true, forces a full refresh from database instead of incremental updates</param>
         /// <returns>A task.</returns>
-        public async Task GetAndApplySearchParameterUpdates(CancellationToken cancellationToken = default)
+        public async Task GetAndApplySearchParameterUpdates(CancellationToken cancellationToken = default, bool forceFullRefresh = false)
         {
-            var updatedSearchParameterStatus = await _searchParameterStatusManager.GetSearchParameterStatusUpdates(cancellationToken);
+            var results = await _searchParameterStatusManager.GetSearchParameterStatusUpdates(cancellationToken, forceFullRefresh ? null : _searchParamLastUpdated);
+            var statuses = results.Statuses;
 
             // First process any deletes or disables, then we will do any adds or updates
             // this way any deleted or params which might have the same code or name as a new
             // parameter will not cause conflicts. Disabled params just need to be removed when calculating the hash.
-            foreach (var searchParam in updatedSearchParameterStatus.Where(p => p.Status == SearchParameterStatus.Deleted))
+            foreach (var searchParam in statuses.Where(p => p.Status == SearchParameterStatus.Deleted))
             {
                 DeleteSearchParameter(searchParam.Uri.OriginalString);
             }
 
-            foreach (var searchParam in updatedSearchParameterStatus.Where(p => p.Status == SearchParameterStatus.PendingDelete))
+            foreach (var searchParam in statuses.Where(p => p.Status == SearchParameterStatus.PendingDelete))
             {
                 _searchParameterDefinitionManager.UpdateSearchParameterStatus(searchParam.Uri.OriginalString, SearchParameterStatus.PendingDelete);
             }
 
-            var paramsToAdd = new List<ITypedElement>();
-            foreach (var searchParam in updatedSearchParameterStatus.Where(p => p.Status == SearchParameterStatus.Enabled || p.Status == SearchParameterStatus.Supported))
-            {
-                var searchParamResource = await GetSearchParameterByUrl(searchParam.Uri.OriginalString, cancellationToken);
+            var statusesToProcess = statuses.Where(p => p.Status == SearchParameterStatus.Enabled || p.Status == SearchParameterStatus.Supported).ToList();
 
-                if (searchParamResource == null)
+            // Batch fetch all SearchParameter resources in one call
+            var searchParamResources = await GetSearchParametersByUrls(statusesToProcess.Select(p => p.Uri.OriginalString).ToList(), cancellationToken);
+
+            var paramsToAdd = new List<ITypedElement>();
+            foreach (var searchParam in statusesToProcess)
+            {
+                if (!searchParamResources.TryGetValue(searchParam.Uri.OriginalString, out var searchParamResource))
                 {
                     _logger.LogInformation(
                         "Updated SearchParameter status found for SearchParameter: {Url}, but did not find any SearchParameter resources when querying for this url.",
@@ -316,6 +324,7 @@ namespace Microsoft.Health.Fhir.Core.Features.Search.Parameters
                     continue;
                 }
 
+                // check if search param is in cache and add if does not exist
                 if (_searchParameterDefinitionManager.TryGetSearchParameter(searchParam.Uri.OriginalString, out var existingSearchParam))
                 {
                     // if the previous version of the search parameter exists we should delete the old information currently stored
@@ -332,10 +341,36 @@ namespace Microsoft.Health.Fhir.Core.Features.Search.Parameters
             }
 
             // Once added to the definition manager we can update their status
+            await _searchParameterStatusManager.ApplySearchParameterStatus(statuses, cancellationToken);
 
-            await _searchParameterStatusManager.ApplySearchParameterStatus(
-                updatedSearchParameterStatus,
-                cancellationToken);
+            var inCache = await ParametersAreInCache(statusesToProcess, cancellationToken);
+
+            if (results.LastUpdated.HasValue && inCache) // this should be the ony place in the code to assign last updated
+            {
+                _searchParamLastUpdated = results.LastUpdated.Value;
+            }
+        }
+
+        // This should handle racing condition between saving new parameter on one VM and refreshing cache on the other,
+        // when refresh is invoked between saving status and saving resource.
+        // This will not be needed when order of saves is reversed (resource first, then status)
+        private async Task<bool> ParametersAreInCache(IReadOnlyCollection<ResourceSearchParameterStatus> statuses, CancellationToken cancellationToken)
+        {
+            var inCache = true;
+            foreach (var status in statuses)
+            {
+                _searchParameterDefinitionManager.TryGetSearchParameter(status.Uri.OriginalString, out var existingSearchParam);
+                using IScoped<ISearchService> search = _searchServiceFactory.Invoke();
+                if (existingSearchParam == null)
+                {
+                    inCache = false;
+                    var msg = $"Did not find in cache uri={status.Uri.OriginalString} status={status.Status}";
+                    _logger.LogInformation(msg);
+                    await search.Value.TryLogEvent("SearchParameterOperations.GetAndApplySearchParameterUpdates", "Error", msg, null, cancellationToken);
+                }
+            }
+
+            return inCache;
         }
 
         private void DeleteSearchParameter(string url)
@@ -350,26 +385,55 @@ namespace Microsoft.Health.Fhir.Core.Features.Search.Parameters
             }
         }
 
-        private async Task<ITypedElement> GetSearchParameterByUrl(string url, CancellationToken cancellationToken)
+        private async Task<Dictionary<string, ITypedElement>> GetSearchParametersByUrls(List<string> urls, CancellationToken cancellationToken)
         {
-            using IScoped<ISearchService> search = _searchServiceFactory.Invoke();
-            var queryParams = new List<Tuple<string, string>>();
-
-            queryParams.Add(new Tuple<string, string>("url", url));
-            var result = await search.Value.SearchAsync(KnownResourceTypes.SearchParameter, queryParams, cancellationToken);
-
-            if (result.Results.Any())
+            if (!urls.Any())
             {
-                if (result.Results.Count() > 1)
-                {
-                    _logger.LogWarning("More than one SearchParameter found with url {Url}. This may cause unpredictable behavior.", url);
-                }
-
-                // There should be only one SearchParameter per url
-                return result.Results.First().Resource.RawResource.ToITypedElement(_modelInfoProvider);
+                return new Dictionary<string, ITypedElement>();
             }
 
-            return null;
+            const int chunkSize = 1500;
+            var searchParametersByUrl = new Dictionary<string, ITypedElement>();
+
+            // Process URLs in chunks to avoid SQL query limitations
+            for (int i = 0; i < urls.Count; i += chunkSize)
+            {
+                var urlChunk = urls.Skip(i).Take(chunkSize).ToList();
+
+                using IScoped<ISearchService> search = _searchServiceFactory.Invoke();
+
+                // Build a query like: url=url1,url2,url3
+                var urlQueryValue = string.Join(",", urlChunk);
+                var queryParams = new List<Tuple<string, string>>
+                {
+                    new Tuple<string, string>("url", urlQueryValue),
+                };
+
+                var result = await search.Value.SearchAsync(KnownResourceTypes.SearchParameter, queryParams, cancellationToken);
+
+                if (result != null)
+                {
+                    foreach (var searchResultEntry in result.Results)
+                    {
+                        var typedElement = searchResultEntry.Resource.RawResource.ToITypedElement(_modelInfoProvider);
+                        var url = typedElement.GetStringScalar("url");
+
+                        if (!string.IsNullOrEmpty(url))
+                        {
+                            if (!searchParametersByUrl.ContainsKey(url))
+                            {
+                                searchParametersByUrl[url] = typedElement;
+                            }
+                            else
+                            {
+                                _logger.LogWarning("More than one SearchParameter found with url {Url}. Using the first one found.", url);
+                            }
+                        }
+                    }
+                }
+            }
+
+            return searchParametersByUrl;
         }
     }
 }

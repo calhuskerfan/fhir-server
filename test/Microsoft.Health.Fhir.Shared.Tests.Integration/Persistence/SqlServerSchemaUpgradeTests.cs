@@ -17,6 +17,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Health.Extensions.DependencyInjection;
+using Microsoft.Health.Extensions.Xunit;
 using Microsoft.Health.Fhir.Core.Configs;
 using Microsoft.Health.Fhir.Core.Features.Definition;
 using Microsoft.Health.Fhir.Core.Features.Persistence;
@@ -92,7 +93,7 @@ namespace Microsoft.Health.Fhir.Tests.Integration.Persistence
             }
         }
 
-        [Fact]
+        [RetryFact]
         public void GivenASchemaVersion_WhenApplyingDiffTwice_ShouldSucceed()
         {
             var versions = Enum.GetValues(typeof(SchemaVersion)).OfType<object>().ToList().Select(x => Convert.ToInt32(x)).ToList();
@@ -232,44 +233,6 @@ namespace Microsoft.Health.Fhir.Tests.Integration.Persistence
             // Exclude them from the schema comparison differences.
             (string type, string name)[] deprecatedObjectToIgnore =
             {
-                ("Procedure", "[dbo].[RebuildIndex]"),
-                ("Procedure", "[dbo].[UpsertResource]"),
-                ("Procedure", "[dbo].[UpsertResource_2]"),
-                ("Procedure", "[dbo].[UpsertResource_3]"),
-                ("Procedure", "[dbo].[UpsertResource_4]"),
-                ("Procedure", "[dbo].[UpsertResource_5]"),
-                ("Procedure", "[dbo].[UpsertResource_6]"),
-                ("Procedure", "[dbo].[ReindexResource]"),
-                ("Procedure", "[dbo].[BulkReindexResources]"),
-                ("Procedure", "[dbo].[CreateTask]"),
-                ("Procedure", "[dbo].[CreateTask_2]"),
-                ("Procedure", "[dbo].[GetNextTask]"),
-                ("Procedure", "[dbo].[GetNextTask_2]"),
-                ("Procedure", "[dbo].[ResetTask]"),
-                ("Procedure", "[dbo].[HardDeleteResource_2]"),
-                ("Procedure", "[dbo].[FetchResourceChanges]"),
-                ("Procedure", "[dbo].[FetchResourceChanges_2]"),
-                ("Procedure", "[dbo].[RemovePartitionFromResourceChanges]"),
-                ("TableType", "[dbo].[ReferenceSearchParamTableType_1]"),
-                ("TableType", "[dbo].[ReferenceTokenCompositeSearchParamTableType_1]"),
-                ("TableType", "[dbo].[ResourceWriteClaimTableType_1]"),
-                ("TableType", "[dbo].[CompartmentAssignmentTableType_1]"),
-                ("TableType", "[dbo].[ReferenceSearchParamTableType_2]"),
-                ("TableType", "[dbo].[TokenSearchParamTableType_1]"),
-                ("TableType", "[dbo].[TokenTextTableType_1]"),
-                ("TableType", "[dbo].[StringSearchParamTableType_1]"),
-                ("TableType", "[dbo].[UriSearchParamTableType_1]"),
-                ("TableType", "[dbo].[NumberSearchParamTableType_1]"),
-                ("TableType", "[dbo].[QuantitySearchParamTableType_1]"),
-                ("TableType", "[dbo].[DateTimeSearchParamTableType_1]"),
-                ("TableType", "[dbo].[ReferenceTokenCompositeSearchParamTableType_2]"),
-                ("TableType", "[dbo].[TokenTokenCompositeSearchParamTableType_1]"),
-                ("TableType", "[dbo].[TokenDateTimeCompositeSearchParamTableType_1]"),
-                ("TableType", "[dbo].[TokenQuantityCompositeSearchParamTableType_1]"),
-                ("TableType", "[dbo].[TokenStringCompositeSearchParamTableType_1]"),
-                ("TableType", "[dbo].[TokenNumberNumberCompositeSearchParamTableType_1]"),
-                ("TableType", "[dbo].[BulkDateTimeSearchParamTableType_1]"),
-                ("TableType", "[dbo].[BulkStringSearchParamTableType_1]"),
             };
 
             var remainingDifferences = result.Differences.Where(

@@ -16,6 +16,8 @@ namespace Microsoft.Health.Fhir.Core.Features.Search
     /// </summary>
     public interface ISearchService
     {
+        Task TryLogEvent(string process, string status, string text, DateTime? startDate, CancellationToken cancellationToken);
+
         /// <summary>
         /// Searches the resources using the <paramref name="queryParameters"/>.
         /// </summary>
@@ -98,7 +100,7 @@ namespace Microsoft.Health.Fhir.Core.Features.Search
             CancellationToken cancellationToken,
             bool isAsyncOperation = false);
 
-        Task<IReadOnlyList<(long StartId, long EndId)>> GetSurrogateIdRanges(
+        Task<IReadOnlyList<(long StartId, long EndId, int Count)>> GetSurrogateIdRanges(
             string resourceType,
             long startId,
             long endId,
@@ -106,7 +108,7 @@ namespace Microsoft.Health.Fhir.Core.Features.Search
             int numberOfRanges,
             bool up,
             CancellationToken cancellationToken,
-            bool? activeOnly = false);
+            bool activeOnly = false);
 
         Task<IReadOnlyList<string>> GetUsedResourceTypes(CancellationToken cancellationToken);
 

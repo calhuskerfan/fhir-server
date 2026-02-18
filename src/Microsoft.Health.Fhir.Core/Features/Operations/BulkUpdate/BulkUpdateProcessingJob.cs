@@ -110,7 +110,6 @@ namespace Microsoft.Health.Fhir.Core.Features.Operations.BulkUpdate
                     queryParametersList.Add(Tuple.Create(KnownQueryParameterNames.Type, definition.Type));
                     queryParametersList.Add(Tuple.Create(KnownQueryParameterNames.GlobalEndSurrogateId, definition.GlobalEndSurrogateId));
                     queryParametersList.Add(Tuple.Create(KnownQueryParameterNames.EndSurrogateId, definition.EndSurrogateId));
-                    queryParametersList.Add(Tuple.Create(KnownQueryParameterNames.GlobalStartSurrogateId, definition.GlobalStartSurrogateId));
                     queryParametersList.Add(Tuple.Create(KnownQueryParameterNames.StartSurrogateId, definition.StartSurrogateId));
 
                     // Subjobs based on resource type-surrogate id ranges, are already scoped to a range definition.MaximumNumberOfResourcesPerQuery
@@ -136,7 +135,7 @@ namespace Microsoft.Health.Fhir.Core.Features.Operations.BulkUpdate
                                       ? 1
                                       : ((definition.MaximumNumberOfResourcesPerQuery - 1) / 1000) + 1);
 
-                    result = await upsertService.Value.UpdateMultipleAsync(definition.Type, definition.Parameters, definition.ReadNextPage, readUpto, isIncludesRequest: false, queryParametersList, null, cancellationToken);
+                    result = await upsertService.Value.UpdateMultipleAsync(definition.Type, definition.Parameters, definition.ReadNextPage, readUpto, isIncludesRequest: false, queryParametersList, null, definition.MetaHistory, cancellationToken);
                 }
                 catch (IncompleteOperationException<BulkUpdateResult> ex)
                 {

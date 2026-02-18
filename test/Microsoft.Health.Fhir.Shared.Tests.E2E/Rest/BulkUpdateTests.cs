@@ -152,12 +152,13 @@ namespace Microsoft.Health.Fhir.Tests.E2E.Rest
             expectedResults.ResourcesUpdated.Add("Patient", 2);
             expectedResults.ResourcesUpdated.Add("Location", 1);
             expectedResults.ResourcesUpdated.Add("Organization", 1);
-            expectedResults.ResourcesIgnored.Add("StructureDefinition", 2);
-            expectedResults.ResourcesIgnored.Add("SearchParameter", 2);
+            expectedResults.ResourcesIgnored.Add("StructureDefinition", 4);  // Changed: use 4 StructureDefinitions instead of 2 + 2 SearchParameters
 
             var tag = new Coding(string.Empty, Guid.NewGuid().ToString());
 
             // Create resources of different types with the same tag
+            // Use StructureDefinition resources which are excluded from bulk update but don't have
+            // side effects like SearchParameter (which pollutes the SearchParam table and causes test conflicts)
             var structureDefinition = Samples.GetJsonSample<StructureDefinition>("StructureDefinition-us-core-birthsex");
             structureDefinition.Meta = new Meta();
             structureDefinition.Meta.Tag.Add(tag);
@@ -168,24 +169,15 @@ namespace Microsoft.Health.Fhir.Tests.E2E.Rest
             structureDefinition.Meta.Tag.Add(tag);
             await _fhirClient.CreateAsync(structureDefinition);
 
-            var randomName = Guid.NewGuid().ToString().ComputeHash()[28..].ToLower();
-            var searchParam = Samples.GetJsonSample<SearchParameter>("SearchParameter-Patient-foo");
-            searchParam.Meta = new Meta();
-            searchParam.Meta.Tag.Add(tag);
-            searchParam.Name = randomName;
-            searchParam.Url = searchParam.Url.Replace("foo", randomName);
-            searchParam.Code = randomName;
-            searchParam.Id = randomName;
-            await _fhirClient.CreateAsync(searchParam);
+            structureDefinition = Samples.GetJsonSample<StructureDefinition>("StructureDefinition-us-core-race");
+            structureDefinition.Meta = new Meta();
+            structureDefinition.Meta.Tag.Add(tag);
+            await _fhirClient.CreateAsync(structureDefinition);
 
-            searchParam = Samples.GetJsonSample<SearchParameter>("SearchParameter-SpecimenStatus");
-            searchParam.Meta = new Meta();
-            searchParam.Meta.Tag.Add(tag);
-            searchParam.Name = randomName;
-            searchParam.Url = searchParam.Url.Replace("foo", randomName);
-            searchParam.Code = randomName;
-            searchParam.Id = randomName;
-            await _fhirClient.CreateAsync(searchParam);
+            structureDefinition = Samples.GetJsonSample<StructureDefinition>("StructureDefinition-us-core-careplan");
+            structureDefinition.Meta = new Meta();
+            structureDefinition.Meta.Tag.Add(tag);
+            await _fhirClient.CreateAsync(structureDefinition);
 
             // Create resources of different types with the same tag
             await _fhirClient.CreateResourcesAsync<Patient>(2, tag.Code);
@@ -308,7 +300,7 @@ namespace Microsoft.Health.Fhir.Tests.E2E.Rest
         }
 
         [SkippableFact]
-#pragma warning disable CS1998 // Async method lacks 'await' operators and will run synchronously
+#pragma warning disable CS1998 // Async method lacks 'await' operators and will run synchronously. Needed due to the Stu3 condition.
         public async Task GivenBulkUpdateJobWithIncludeSearchWithIsParallelFalse_WhenCompleted_ThenIncludedResourcesAreUpdated()
 #pragma warning restore CS1998 // Async method lacks 'await' operators and will run synchronously
         {
@@ -653,6 +645,79 @@ namespace Microsoft.Health.Fhir.Tests.E2E.Rest
             expectedResultsForIncludedResultsOnDifferentPages.ResourcesUpdated.Add("Patient", 4010);
             expectedResultsForIncludedResultsOnDifferentPages.ResourcesUpdated.Add("Group", 1012);
             await MonitorBulkUpdateJob(responseForIncludedResultsOnDifferentPages.Content.Headers.ContentLocation, expectedResultsForIncludedResultsOnDifferentPages);
+        }
+
+        [SkippableFact]
+        public async Task GivenBulkUpdateWithMetaHistoryDisabled_WhenCompleted_ThenNoHistoricalVersionWasCreated()
+        {
+            CheckBulkUpdateEnabled();
+            var tag = Guid.NewGuid().ToString();
+            await CreatePatients(tag, 10);
+            await Task.Delay(5000); // Add delay to ensure resources are created before bulk update
+
+            // Create a patch request that updates a field on Patient
+            var patchRequest = new Parameters()
+                .AddAddPatchParameter("Patient.meta", "security", new Coding("http://example.org/security-system", "SECURITY_TAG_CODE"));
+            ChangeTypeToUpsertPatchParameter(patchRequest);
+            var queryParam = new Dictionary<string, string>
+                {
+                    { "_meta-history", "false" },
+                };
+            using HttpResponseMessage response = await SendBulkUpdateRequest(tag, patchRequest, "Patient/$bulk-update", queryParam);
+            Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+
+            BulkUpdateResult expectedResults = new BulkUpdateResult();
+            expectedResults.ResourcesUpdated.Add("Patient", 10);
+            await MonitorBulkUpdateJob(response.Content.Headers.ContentLocation, expectedResults);
+
+            // Verify no historical versions were created
+            var patients = await _fhirClient.SearchAsync(ResourceType.Patient, $"_tag={tag}");
+            Assert.True(patients.Resource.Entry.Count == 10);
+            foreach (var entry in patients.Resource.Entry)
+            {
+                var patient = (Patient)entry.Resource;
+                var history = await _fhirClient.ReadHistoryAsync(ResourceType.Patient, patient.Id);
+                Assert.Single(history.Resource.Entry); // Only one version should exist
+            }
+        }
+
+        [SkippableTheory]
+        [InlineData(true)]
+        [InlineData(false)]
+        public async Task GivenBulkUpdateWithMetaHistoryEnabled_WhenCompleted_ThenHistoricalVersionWasCreated(bool includeParameter)
+        {
+            CheckBulkUpdateEnabled();
+            var tag = Guid.NewGuid().ToString();
+            await CreatePatients(tag, 10);
+            await Task.Delay(5000); // Add delay to ensure resources are created before bulk update
+
+            // Create a patch request that updates a field on Patient
+            var patchRequest = new Parameters()
+                .AddAddPatchParameter("Patient.meta", "security", new Coding("http://example.org/security-system", "SECURITY_TAG_CODE"));
+            ChangeTypeToUpsertPatchParameter(patchRequest);
+
+            var queryParam = new Dictionary<string, string>();
+            if (includeParameter)
+            {
+                queryParam.Add("_meta-history", "true");
+            }
+
+            using HttpResponseMessage response = await SendBulkUpdateRequest(tag, patchRequest, "Patient/$bulk-update", queryParam);
+            Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
+
+            BulkUpdateResult expectedResults = new BulkUpdateResult();
+            expectedResults.ResourcesUpdated.Add("Patient", 10);
+            await MonitorBulkUpdateJob(response.Content.Headers.ContentLocation, expectedResults);
+
+            // Verify historical versions were created
+            var patients = await _fhirClient.SearchAsync(ResourceType.Patient, $"_tag={tag}");
+            Assert.True(patients.Resource.Entry.Count == 10);
+            foreach (var entry in patients.Resource.Entry)
+            {
+                var patient = (Patient)entry.Resource;
+                var history = await _fhirClient.ReadHistoryAsync(ResourceType.Patient, patient.Id);
+                Assert.True(history.Resource.Entry.Count == 2); // Two versions should exist
+            }
         }
 
         private async Task RunBulkUpdateRequest(
