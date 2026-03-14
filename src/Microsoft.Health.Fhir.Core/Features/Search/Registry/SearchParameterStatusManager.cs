@@ -53,7 +53,8 @@ namespace Microsoft.Health.Fhir.Core.Features.Search.Registry
         {
             var updated = new List<SearchParameterInfo>();
             var searchParamResourceStatus = await _searchParameterStatusDataStore.GetSearchParameterStatuses(cancellationToken);
-            var parameters = searchParamResourceStatus.ToDictionary(x => x.Uri);
+            var parameters = searchParamResourceStatus
+                .ToDictionary(x => x.Uri?.OriginalString, StringComparer.Ordinal);
 
             EnsureArg.IsNotNull(_searchParameterDefinitionManager.AllSearchParameters);
             EnsureArg.IsTrue(_searchParameterDefinitionManager.AllSearchParameters.Any());
@@ -62,7 +63,7 @@ namespace Microsoft.Health.Fhir.Core.Features.Search.Registry
             // Set states of known parameters
             foreach (SearchParameterInfo p in _searchParameterDefinitionManager.AllSearchParameters)
             {
-                if (parameters.TryGetValue(p.Url, out ResourceSearchParameterStatus result))
+                if (parameters.TryGetValue(p.Url?.OriginalString, out ResourceSearchParameterStatus result))
                 {
                     var tempStatus = EvaluateSearchParamStatus(result);
 
@@ -91,6 +92,21 @@ namespace Microsoft.Health.Fhir.Core.Features.Search.Registry
                 }
                 else
                 {
+                    // ResourceTypeSearchParameter is a special hardcoded parameter added to
+                    // AllSearchParameters by the UrlLookup registration. It has no entry in the
+                    // status store and SearchParameterSupportResolver.IsSearchParameterSupported
+                    // throws "No target resources defined" for it because it has no BaseResourceTypes
+                    // or TargetResourceTypes. Force it to searchable/supported so background tasks
+                    // (which use SearchableSearchParameterDefinitionManager with UsePartialSearchParams=false)
+                    // don't throw SearchParameterNotSupportedException.
+                    if (p.Url == SearchParameterNames.ResourceTypeUri)
+                    {
+                        p.IsSearchable = true;
+                        p.IsSupported = true;
+                        updated.Add(p);
+                        continue;
+                    }
+
                     p.IsSearchable = false;
 
                     // Check if this parameter is now supported.
@@ -130,7 +146,7 @@ namespace Microsoft.Health.Fhir.Core.Features.Search.Registry
             var searchParameterStatusList = new List<ResourceSearchParameterStatus>();
             var updated = new List<SearchParameterInfo>();
             var parameters = (await _searchParameterStatusDataStore.GetSearchParameterStatuses(cancellationToken))
-                .ToDictionary(x => x.Uri.OriginalString);
+                .ToDictionary(x => x.Uri.OriginalString, StringComparer.Ordinal);
 
             foreach (string uri in searchParameterUris)
             {
