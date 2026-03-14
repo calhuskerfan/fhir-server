@@ -399,5 +399,20 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
 
             return Task.CompletedTask;
         }
+
+        Task IFhirDataStore.TryLogEvent(string process, string status, string text, DateTime? startDate, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
+
+        Task<MergeOutcome> IFhirDataStore.MergeAsync(IReadOnlyList<ResourceWrapperOperation> resources, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
+
+        Task<MergeOutcome> IFhirDataStore.MergeAsync(IReadOnlyList<ResourceWrapperOperation> resources, MergeOptions mergeOptions, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

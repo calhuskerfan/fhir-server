@@ -213,8 +213,8 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search
 
             throw new NotImplementedException();
         }
-#endif
 #pragma warning restore CS1998
 #pragma warning restore CA1822
+#endif
     }
 }

@@ -222,6 +222,8 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
 
         // VisitNotExpression
         // TODOCJH: Verify that this can handle nesting.
+        // the thing to worry about is not [ a and b ] in this case accept visitor could call Add Condition on both a and b where negation would be
+        // set.
         public object? VisitNotExpression(NotExpression expression, ExpressionQueryBuilderContext context)
         {
             context.Assembler.IncrementNegation();

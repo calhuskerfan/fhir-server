@@ -2,6 +2,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // -------------------------------------------------------------------------------------------------
+using DotLiquid;
 using Microsoft.Health.Fhir.Core.Features.Search.Expressions;
 using Microsoft.Health.Fhir.MongoDb.Features.Storage;
 using MongoDB.Bson;
@@ -43,6 +44,10 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
                 return;
             }
 
+            // ok, so if we have a stack started, then we are actually pushing to the BsonArray[] of the parent, not the root of the stack
+            // and in reality, when we get back around to it there is really not a stack anyway, so we need to change the nomenclature here a little bit
+            // lets get everthing working first then we can come back.
+
             _multiaryOperatorStack.Push(new Tuple<MultiaryOperator, BsonArray>(op, []));
         }
 
@@ -65,13 +70,13 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
                     matchConditions.Add(new BsonElement(_bsonAndOperator, arr.Item2));
                 }
 
-                _inProcessConditions.Add(matchConditions);
+                AddCondition(matchConditions, true);
             }
         }
 
-        public void AddCondition(BsonDocument condition)
+        private void AddCondition(BsonDocument condition, bool skipNegationCheck)
         {
-            if (_negationCount > 0)
+            if (_negationCount > 0 && !skipNegationCheck)
             {
                 condition = new BsonDocument(
                     condition.Names.First(),
@@ -80,12 +85,20 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
 
             if (_multiaryOperatorStack.Count > 0)
             {
-                _multiaryOperatorStack.Peek().Item2.Add(condition);
+                _multiaryOperatorStack
+                    .Peek()
+                    .Item2
+                    .Add(condition);
             }
             else
             {
                 _inProcessConditions.Add(condition);
             }
+        }
+
+        public void AddCondition(BsonDocument condition)
+        {
+            AddCondition(condition, false);
         }
 
         public void IncrementNegation()
