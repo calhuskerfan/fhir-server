@@ -169,18 +169,18 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
                 .DeleteOneAsync(filter, cancellationToken);
         }
 
-        public async Task<IDictionary<DataStoreOperationIdentifier, DataStoreOperationOutcome>> MergeAsync(
-            IReadOnlyList<ResourceWrapperOperation> resources,
-            CancellationToken cancellationToken)
+        public async Task<MergeOutcome> MergeAsync(IReadOnlyList<ResourceWrapperOperation> resources, CancellationToken cancellationToken)
         {
             return await MergeAsync(resources, MergeOptions.Default, cancellationToken);
         }
 
-        public async Task<IDictionary<DataStoreOperationIdentifier, DataStoreOperationOutcome>> MergeAsync(
-            IReadOnlyList<ResourceWrapperOperation> resources,
-            MergeOptions mergeOptions,
-            CancellationToken cancellationToken)
+        public async Task<MergeOutcome> MergeAsync(IReadOnlyList<ResourceWrapperOperation> resources, MergeOptions mergeOptions, CancellationToken cancellationToken)
         {
+            if (resources == null || resources.Count == 0)
+            {
+                return MergeOutcome.Empty;
+            }
+
             var results = await MergeInternalAsync(
                 resources,
                 false,
@@ -189,7 +189,7 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
                 false,
                 cancellationToken); // TODO: Pass correct retries value once we start supporting retries
 
-            return results;
+            return new MergeOutcome(MergeOutcomeFinalState.Completed, results);
         }
 
         // does the actual work of merging or creating new if the old one does not exist
@@ -312,7 +312,7 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
 
             var mergeOutcome = await MergeAsync(new[] { resource }, cancellationToken);
 
-            DataStoreOperationOutcome dataStoreOperationOutcome = mergeOutcome.First().Value;
+            DataStoreOperationOutcome dataStoreOperationOutcome = mergeOutcome.Results.First().Value;
 
             if (dataStoreOperationOutcome.IsOperationSuccessful)
             {
@@ -333,13 +333,21 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
         }
 
         // HardDeleteAsync
-        public Task HardDeleteAsync(
+        public async Task HardDeleteAsync(
             ResourceKey key,
             bool keepCurrentVersion,
             bool allowPartialSuccess,
             CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
+            EnsureArg.IsNotNull(key, nameof(key));
+
+            var filter = Builders<BsonDocument>
+                .Filter
+                .Eq($"{FieldNameConstants.Resource}.{FieldNameConstants.Id}", key.Id);
+
+            await _dataStoreConfiguration
+                .GetCollection()
+                .DeleteOneAsync(filter, cancellationToken);
         }
 
         /// <summary>
@@ -400,19 +408,9 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
             return Task.CompletedTask;
         }
 
-        Task IFhirDataStore.TryLogEvent(string process, string status, string text, DateTime? startDate, CancellationToken cancellationToken)
+        public Task TryLogEvent(string process, string status, string text, DateTime? startDate, CancellationToken cancellationToken)
         {
-            throw new NotImplementedException();
-        }
-
-        Task<MergeOutcome> IFhirDataStore.MergeAsync(IReadOnlyList<ResourceWrapperOperation> resources, CancellationToken cancellationToken)
-        {
-            throw new NotImplementedException();
-        }
-
-        Task<MergeOutcome> IFhirDataStore.MergeAsync(IReadOnlyList<ResourceWrapperOperation> resources, MergeOptions mergeOptions, CancellationToken cancellationToken)
-        {
-            throw new NotImplementedException();
+            return Task.CompletedTask;
         }
     }
 }

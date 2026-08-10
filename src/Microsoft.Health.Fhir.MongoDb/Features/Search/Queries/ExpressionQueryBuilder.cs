@@ -300,6 +300,11 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
             throw new NotImplementedException();
         }
 
+        public object? VisitNotReferencing(NotReferencingExpression expression, ExpressionQueryBuilderContext context)
+        {
+            throw new NotImplementedException();
+        }
+
         private static string GetMappedValue<T>(Dictionary<T, string> mapping, T key)
         {
             if (mapping.TryGetValue(key, out string value))
