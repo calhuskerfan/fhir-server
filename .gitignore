@@ -91,6 +91,9 @@ ipch/
 *.vspx
 *.sap
 
+# Visual Studio Code C# Dev Kit cache files
+*.lscache
+
 # TFS 2012 Local Workspace
 $tf/
 
@@ -198,6 +201,7 @@ ClientBin/
 *.pfx
 *.publishsettings
 orleans.codegen.cs
+ab-test-results/
 
 # Since there are multiple workflows, uncomment next line to ignore bower_components
 # (https://github.com/github/gitignore/pull/1529#issuecomment-104372622)
@@ -296,6 +300,10 @@ install-aso/
 *.Generated.cs
 *.Generated.*.cs
 
+# Exclude auto-generated SQL schema snapshot files, keep the .diff.sql
+src/Microsoft.Health.Fhir.SqlServer/Features/Schema/Migrations/*.sql
+!src/Microsoft.Health.Fhir.SqlServer/Features/Schema/Migrations/*.diff.sql
+
 # Azurite temporary files
 __*
 
@@ -304,6 +312,7 @@ __*
 
 # For ignroing .local files from MultiInstanceRunner
 .local/
+
 
 
 ################################## START DO NOT MERGE CALHUSKERFAN

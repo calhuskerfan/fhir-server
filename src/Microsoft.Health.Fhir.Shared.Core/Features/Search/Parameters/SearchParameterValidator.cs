@@ -8,21 +8,21 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection.Metadata;
 using System.Threading;
+using System.Threading.Tasks;
 using EnsureThat;
 using FluentValidation.Results;
 using Hl7.Fhir.Model;
 using Hl7.Fhir.Rest;
 using Microsoft.Extensions.Logging;
 using Microsoft.Health.Core.Features.Security.Authorization;
-using Microsoft.Health.Extensions.DependencyInjection;
 using Microsoft.Health.Fhir.Core;
 using Microsoft.Health.Fhir.Core.Exceptions;
 using Microsoft.Health.Fhir.Core.Features.Definition;
-using Microsoft.Health.Fhir.Core.Features.Operations;
 using Microsoft.Health.Fhir.Core.Features.Search;
 using Microsoft.Health.Fhir.Core.Features.Search.Parameters;
 using Microsoft.Health.Fhir.Core.Features.Search.Registry;
 using Microsoft.Health.Fhir.Core.Features.Security;
+using Microsoft.Health.Fhir.Core.Features.Security.Authorization;
 using Microsoft.Health.Fhir.Core.Features.Validation;
 using Microsoft.Health.Fhir.Core.Models;
 #if !Stu3 && !R4 && !R4B
@@ -34,13 +34,13 @@ namespace Microsoft.Health.Fhir.Shared.Core.Features.Search.Parameters
 {
     public class SearchParameterValidator : ISearchParameterValidator
     {
-        private readonly Func<IScoped<IFhirOperationDataStore>> _fhirOperationDataStoreFactory;
         private readonly IAuthorizationService<DataActions> _authorizationService;
         private readonly ISearchParameterDefinitionManager _searchParameterDefinitionManager;
         private readonly IModelInfoProvider _modelInfoProvider;
         private readonly ISearchParameterOperations _searchParameterOperations;
         private readonly ISearchParameterComparer<SearchParameterInfo> _searchParameterComparer;
         private readonly ILogger _logger;
+        private readonly int _maxUrlLength = 128;
 
         private const string HttpPostName = "POST";
         private const string HttpPutName = "PUT";
@@ -48,7 +48,6 @@ namespace Microsoft.Health.Fhir.Shared.Core.Features.Search.Parameters
         private const string HttpPatchName = "PATCH";
 
         public SearchParameterValidator(
-            Func<IScoped<IFhirOperationDataStore>> fhirOperationDataStoreFactory,
             IAuthorizationService<DataActions> authorizationService,
             ISearchParameterDefinitionManager searchParameterDefinitionManager,
             IModelInfoProvider modelInfoProvider,
@@ -56,14 +55,12 @@ namespace Microsoft.Health.Fhir.Shared.Core.Features.Search.Parameters
             ISearchParameterComparer<SearchParameterInfo> searchParameterComparer,
             ILogger<SearchParameterValidator> logger)
         {
-            EnsureArg.IsNotNull(fhirOperationDataStoreFactory, nameof(fhirOperationDataStoreFactory));
             EnsureArg.IsNotNull(authorizationService, nameof(authorizationService));
             EnsureArg.IsNotNull(searchParameterDefinitionManager, nameof(searchParameterDefinitionManager));
             EnsureArg.IsNotNull(modelInfoProvider, nameof(modelInfoProvider));
             EnsureArg.IsNotNull(searchParameterOperations, nameof(searchParameterOperations));
             EnsureArg.IsNotNull(searchParameterComparer, nameof(searchParameterComparer));
 
-            _fhirOperationDataStoreFactory = fhirOperationDataStoreFactory;
             _authorizationService = authorizationService;
             _searchParameterDefinitionManager = searchParameterDefinitionManager;
             _modelInfoProvider = modelInfoProvider;
@@ -72,27 +69,14 @@ namespace Microsoft.Health.Fhir.Shared.Core.Features.Search.Parameters
             _logger = EnsureArg.IsNotNull(logger, nameof(logger));
         }
 
-        public async Task ValidateSearchParameterInput(SearchParameter searchParam, string method, CancellationToken cancellationToken)
+        public async Task<DateTimeOffset?> ValidateSearchParameterInput(SearchParameter searchParam, string method, CancellationToken cancellationToken, DateTimeOffset? lastUpdated = null)
         {
-            if (await _authorizationService.CheckAccess(DataActions.Reindex, cancellationToken) != DataActions.Reindex)
-            {
-                throw new UnauthorizedFhirActionException();
-            }
-
-            // check if reindex job is running
-            using (IScoped<IFhirOperationDataStore> fhirOperationDataStore = _fhirOperationDataStoreFactory())
-            {
-                (var activeReindexJobs, var reindexJobId) = await fhirOperationDataStore.Value.CheckActiveReindexJobsAsync(cancellationToken);
-                if (activeReindexJobs)
-                {
-                    throw new JobConflictException(string.Format(Resources.ChangesToSearchParametersNotAllowedWhileReindexing, reindexJobId));
-                }
-            }
+            await _authorizationService.CheckAccess(DataActions.Reindex, true, cancellationToken);
 
             if (string.IsNullOrEmpty(searchParam.Url) && (method.Equals(HttpDeleteName, StringComparison.Ordinal) || method.Equals(HttpPatchName, StringComparison.Ordinal)))
             {
                 // Return out if this is delete OR patch call and no Url so FHIRController can move to next action
-                return;
+                return null;
             }
 
             var validationFailures = new List<ValidationFailure>();
@@ -102,6 +86,12 @@ namespace Microsoft.Health.Fhir.Shared.Core.Features.Search.Parameters
                 _logger.LogInformation("Search parameter definition is missing a url. url is null or empty.");
                 validationFailures.Add(
                     new ValidationFailure(nameof(Base.TypeName), Resources.SearchParameterDefinitionInvalidMissingUri));
+            }
+            else if (searchParam.Url.Length > _maxUrlLength)
+            {
+                _logger.LogInformation("Search parameter definition has a url that exceeds the maximum length. url: {Url}, length: {Length}", searchParam.Url, searchParam.Url.Length);
+                validationFailures.Add(
+                    new ValidationFailure(nameof(searchParam.Url), string.Format(Resources.SearchParameterDefinitionInvalidUriExceedsMaxLength, searchParam.Url, _maxUrlLength)));
             }
             else
             {
@@ -117,7 +107,11 @@ namespace Microsoft.Health.Fhir.Shared.Core.Features.Search.Parameters
                 else
                 {
                     // Refresh the search parameter cache in the search parameter definition manager before starting the validation.
-                    await _searchParameterOperations.GetAndApplySearchParameterUpdates(cancellationToken);
+                    if (!lastUpdated.HasValue)
+                    {
+                        await _searchParameterOperations.GetAndApplySearchParameterUpdates(cancellationToken);
+                        lastUpdated = _searchParameterOperations.SearchParamLastUpdated;
+                    }
 
                     // If a search parameter with the same uri exists already
                     if (_searchParameterDefinitionManager.TryGetSearchParameter(searchParam.Url, out var searchParameterInfo))
@@ -168,6 +162,8 @@ namespace Microsoft.Health.Fhir.Shared.Core.Features.Search.Parameters
             {
                 throw new ResourceNotValidException(validationFailures);
             }
+
+            return lastUpdated.Value; // value should not be null here.
         }
 
         private void CheckForConflictingCodeValue(SearchParameter searchParam, List<ValidationFailure> validationFailures)

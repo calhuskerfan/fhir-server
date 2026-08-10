@@ -10,7 +10,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using EnsureThat;
-using MediatR;
+using Medino;
 using Microsoft.Extensions.Primitives;
 using Microsoft.Health.Core.Features.Context;
 using Microsoft.Health.Extensions.DependencyInjection;
@@ -19,9 +19,12 @@ using Microsoft.Health.Fhir.Core.Features.Context;
 using Microsoft.Health.Fhir.Core.Features.Operations.BulkDelete.Messages;
 using Microsoft.Health.Fhir.Core.Features.Persistence;
 using Microsoft.Health.Fhir.Core.Features.Search;
+using Microsoft.Health.Fhir.Core.Features.Search.Parameters;
 using Microsoft.Health.Fhir.Core.Messages.Delete;
+using Microsoft.Health.Fhir.Core.Models;
 using Microsoft.Health.JobManagement;
 using Newtonsoft.Json;
+using FhirJobConflictException = Microsoft.Health.Fhir.Core.Features.Operations.JobConflictException;
 
 namespace Microsoft.Health.Fhir.Core.Features.Operations.BulkDelete
 {
@@ -96,8 +99,31 @@ namespace Microsoft.Health.Fhir.Core.Features.Operations.BulkDelete
                 catch (IncompleteOperationException<IDictionary<string, long>> ex)
                 {
                     resourcesDeleted = ex.PartialResults;
-                    result.Issues.Add(ex.Message);
-                    exception = ex;
+                    bool conflictFound = false;
+
+                    if (ex.InnerException is AggregateException aggEx)
+                    {
+                        foreach (var innerEx in aggEx.InnerExceptions)
+                        {
+                            // Reindex conflicts (SQL/Cosmos) are thrown as Microsoft.Health.Fhir.Core.Features.Operations.JobConflictException upstream.
+                            if (innerEx is IncompleteOperationException<Dictionary<string, long>> incompleteEx && incompleteEx.InnerException is FhirJobConflictException conflictEx)
+                            {
+                                result.Issues.Add($"JobConflictException: {conflictEx.Message}");
+                                exception = conflictEx;
+                                conflictFound = true;
+                            }
+                            else
+                            {
+                                result.Issues.Add($"{innerEx.GetType().Name}: {innerEx.Message}");
+                            }
+                        }
+                    }
+
+                    if (!conflictFound)
+                    {
+                        result.Issues.Add(ex.Message);
+                        exception = ex;
+                    }
                 }
 
                 foreach (var (key, value) in resourcesDeleted)
@@ -108,7 +134,7 @@ namespace Microsoft.Health.Fhir.Core.Features.Operations.BulkDelete
                     }
                 }
 
-                await _mediator.Publish(new BulkDeleteMetricsNotification(jobInfo.Id, resourcesDeleted.Sum(resource => resource.Value)), cancellationToken);
+                await _mediator.PublishAsync(new BulkDeleteMetricsNotification(jobInfo.Id, resourcesDeleted.Sum(resource => resource.Value)), cancellationToken);
 
                 if (exception != null)
                 {
@@ -119,7 +145,7 @@ namespace Microsoft.Health.Fhir.Core.Features.Operations.BulkDelete
                 {
                     types.RemoveAt(0);
                     using var searchService = _searchService.Invoke();
-                    BulkDeleteDefinition processingDefinition = await BulkDeleteOrchestratorJob.CreateProcessingDefinition(definition, searchService.Value, types, cancellationToken);
+                    BulkDeleteDefinition processingDefinition = await BulkDeleteOrchestratorJob.CreateProcessingDefinition(jobInfo, definition, searchService.Value, types, cancellationToken);
 
                     if (processingDefinition != null)
                     {

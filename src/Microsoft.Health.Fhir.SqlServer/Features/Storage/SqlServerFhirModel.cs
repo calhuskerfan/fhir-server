@@ -1,4 +1,4 @@
-﻿// -------------------------------------------------------------------------------------------------
+// -------------------------------------------------------------------------------------------------
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // -------------------------------------------------------------------------------------------------
@@ -12,13 +12,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using EnsureThat;
 using Hl7.Fhir.Model;
-using MediatR;
+using Medino;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Health.Abstractions.Exceptions;
 using Microsoft.Health.Extensions.DependencyInjection;
 using Microsoft.Health.Fhir.Core.Configs;
+using Microsoft.Health.Fhir.Core.Exceptions;
 using Microsoft.Health.Fhir.Core.Features.Definition;
 using Microsoft.Health.Fhir.Core.Features.Operations;
 using Microsoft.Health.Fhir.Core.Features.Search.Registry;
@@ -107,7 +108,13 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
         public short GetResourceTypeId(string resourceTypeName)
         {
             ThrowIfNotInitialized();
-            return _resourceTypeToId[resourceTypeName];
+
+            if (_resourceTypeToId.TryGetValue(resourceTypeName, out short resourceTypeId))
+            {
+                return resourceTypeId;
+            }
+
+            throw new ResourceNotFoundException($"Resource type '{resourceTypeName}' is not a known resource type.");
         }
 
         public bool TryGetResourceTypeId(string resourceTypeName, out short id)
@@ -219,7 +226,7 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
 
             _highestInitializedVersion = version;
 
-            await _mediator.Publish(new StorageInitializedNotification(), CancellationToken.None);
+            await _mediator.PublishAsync(new StorageInitializedNotification(), CancellationToken.None);
         }
 
         private async Task InitializeBase(CancellationToken cancellationToken)
@@ -234,6 +241,11 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
             string commaSeparatedResourceTypes = string.Join(",", ModelInfoProvider.GetResourceTypeNames());
             string commaSeparatedClaimTypes = string.Join(',', _securityConfiguration.PrincipalClaims);
             string commaSeparatedCompartmentTypes = string.Join(',', ModelInfoProvider.GetCompartmentTypeNames());
+
+            _systemToId = new FhirMemoryCache<int>("systemToId", _logger, ignoreCase: true);
+            _quantityCodeToId = new FhirMemoryCache<int>("quantityCodeToId", _logger, ignoreCase: true);
+            bool systemWarningLogged = false;
+            bool quantityCodeWarningLogged = false;
 
             using var cmd = new SqlCommand();
             cmd.CommandType = CommandType.StoredProcedure;
@@ -266,11 +278,41 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
                     },
                     (reader) =>
                     {
-                        return reader.ReadRow(VLatest.System.Value, VLatest.System.SystemId);
+                        // This data is processed in a streaming fashion to avoid loading the entire set of systems into memory at once, as there could be a large number of them.
+                        if (systemWarningLogged)
+                        {
+                            // If we've already logged a warning about the cache size, we can skip trying to add to the cache to save some CPU and memory.
+                            return null;
+                        }
+
+                        var (value, systemId) = reader.ReadRow(VLatest.System.Value, VLatest.System.SystemId);
+
+                        if (!_systemToId.TryAdd(value, systemId) && !systemWarningLogged)
+                        {
+                            _logger.LogWarning($"Cache '{_systemToId.Name}' reached the limit of {_systemToId.CacheMemoryLimit} bytes (with {_systemToId.Count} cached elements).");
+                            systemWarningLogged = true;
+                        }
+
+                        return null;
                     },
                     (reader) =>
                     {
-                        return reader.ReadRow(VLatest.QuantityCode.Value, VLatest.QuantityCode.QuantityCodeId);
+                        // This data is processed in a streaming fashion to avoid loading the entire set of quantity codes into memory at once, as there could be a large number of them.
+                        if (quantityCodeWarningLogged)
+                        {
+                            // If we've already logged a warning about the cache size, we can skip trying to add to the cache to save some CPU and memory.
+                            return null;
+                        }
+
+                        var (value, quantityCodeId) = reader.ReadRow(VLatest.QuantityCode.Value, VLatest.QuantityCode.QuantityCodeId);
+
+                        if (!_quantityCodeToId.TryAdd(value, quantityCodeId) && !quantityCodeWarningLogged)
+                        {
+                            _logger.LogWarning($"Cache '{_quantityCodeToId.Name}' reached the limit of {_quantityCodeToId.CacheMemoryLimit} bytes (with {_quantityCodeToId.Count} cached elements).");
+                            quantityCodeWarningLogged = true;
+                        }
+
+                        return null;
                     },
                 },
                 _logger,
@@ -315,6 +357,8 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
                 searchParamUriToId.Add(new Uri(uri), searchParamId);
             }
 
+            _logger.LogInformation("Initialized {Count} search parameters.", searchParamUriToId.Count);
+
             // result set 3
             foreach (var result in resultsList[2])
             {
@@ -329,33 +373,6 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
                 compartmentTypeToId.Add(compartmentName, id);
             }
 
-            // result set 5
-            _systemToId = new FhirMemoryCache<int>("systemToId", _logger, ignoreCase: true);
-            bool systemWarningLogged = false;
-            foreach (var result in resultsList[4])
-            {
-                var (value, systemId) = ((string, int))result;
-
-                if (!_systemToId.TryAdd(value, systemId) && !systemWarningLogged)
-                {
-                    _logger.LogWarning($"Cache '{_systemToId.Name}' reached the limit of {_systemToId.CacheMemoryLimit} bytes (with {_systemToId.Count} cached elements).");
-                    systemWarningLogged = true;
-                }
-            }
-
-            // result set 6
-            _quantityCodeToId = new FhirMemoryCache<int>("quantityCodeToId", _logger, ignoreCase: true);
-            bool quantityCodeWarningLogged = false;
-            foreach (var result in resultsList[5])
-            {
-                (string value, int quantityCodeId) = ((string, int))result;
-                if (!_quantityCodeToId.TryAdd(value, quantityCodeId) && !quantityCodeWarningLogged)
-                {
-                    _logger.LogWarning($"Cache '{_quantityCodeToId.Name}' reached the limit of {_quantityCodeToId.CacheMemoryLimit} bytes (with {_quantityCodeToId.Count} cached elements).");
-                    quantityCodeWarningLogged = true;
-                }
-            }
-
             _resourceTypeToId = resourceTypeToId;
             _resourceTypeIdToTypeName = resourceTypeIdToTypeName;
             _searchParamUriToId = searchParamUriToId;
@@ -364,7 +381,7 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
             _resourceTypeIdRange = (lowestResourceTypeId, highestResourceTypeId);
         }
 
-        private async Task InitializeSearchParameterStatuses(CancellationToken cancellationToken)
+        private async Task InitializeSearchParameterStatuses(CancellationToken cancellationToken, int retryDepth = 0)
         {
             if (_schemaInformation.Current < SchemaVersionConstants.FhirModelInitialization)
             {
@@ -404,6 +421,12 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
 
             fileStatuses.RemoveAll((fs) => existingParams.Any((param) => param.Uri == fs.Uri && (param.Status != SearchParameterStatus.Initialized)));
 
+            if (fileStatuses.Count == 0)
+            {
+                _logger.LogInformation("No Search Parameters need to be initialized.");
+                return;
+            }
+
             using var resourceExistCmd = new SqlCommand();
             resourceExistCmd.CommandType = CommandType.Text;
             resourceExistCmd.CommandText = "SELECT TOP 1 1 FROM dbo.Resource";
@@ -411,7 +434,14 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
 
             fileStatuses.ForEach(fs =>
             {
-                fs.Status = hasResources ? SearchParameterStatus.Supported : SearchParameterStatus.Enabled;
+                // Preserve the Unsupported status that comes from unsupported-search-parameters.json.
+                // Overwriting it would cause parameters that the server cannot search on to be reported
+                // as Enabled/Supported, and returning 500 error instead of an OperationOutcome warning.
+                if (fs.Status != SearchParameterStatus.Unsupported)
+                {
+                    fs.Status = hasResources ? SearchParameterStatus.Supported : SearchParameterStatus.Enabled;
+                }
+
                 fs.LastUpdated = existingParams.FirstOrDefault(p => p.Uri == fs.Uri)?.LastUpdated ?? fs.LastUpdated;
             });
 
@@ -421,9 +451,22 @@ namespace Microsoft.Health.Fhir.SqlServer.Features.Storage
 
             new SearchParamListTableValuedParameterDefinition("@SearchParams").AddParameter(cmd.Parameters, new SearchParamListRowGenerator().GenerateRows(fileStatuses));
 
-            await cmd.ExecuteNonQueryAsync(_sqlRetryService, _logger, cancellationToken);
+            try
+            {
+                await cmd.ExecuteNonQueryAsync(_sqlRetryService, _logger, cancellationToken);
+                _logger.LogInformation("Number of Search Parameters initialized: {Number}", fileStatuses.Count);
+            }
+            catch (SqlException ex) when (ex.Number == 50001)
+            {
+                if (retryDepth >= 3)
+                {
+                    _logger.LogError("Maximum retry attempts reached for initializing search parameter statuses.");
+                    throw;
+                }
 
-            _logger.LogInformation("Number of Search Parameters initialized");
+                _logger.LogInformation("Concurrent update detected, retrying");
+                await InitializeSearchParameterStatuses(cancellationToken, retryDepth + 1);
+            }
         }
 
         private int GetStringId(FhirMemoryCache<int> cache, string stringValue, StoredProcedure sproc)

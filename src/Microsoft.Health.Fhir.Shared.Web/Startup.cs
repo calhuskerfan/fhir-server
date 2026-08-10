@@ -9,7 +9,7 @@ using System.Diagnostics.Metrics;
 using System.Globalization;
 using System.Linq;
 using Azure.Monitor.OpenTelemetry.AspNetCore;
-using MediatR;
+using Medino;
 using Microsoft.ApplicationInsights.Extensibility;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
@@ -335,7 +335,8 @@ namespace Microsoft.Health.Fhir.Web
                         {
                             var httpContextAccessor = sp.GetRequiredService<IHttpContextAccessor>();
                             var failureMetricHandler = sp.GetRequiredService<IFailureMetricHandler>();
-                            return new AzureMonitorOpenTelemetryLogEnricher(httpContextAccessor, failureMetricHandler);
+                            var exceptionMetricEmissionFilters = sp.GetServices<Microsoft.Health.Fhir.Api.Features.Metrics.IExceptionMetricEmissionFilter>();
+                            return new AzureMonitorOpenTelemetryLogEnricher(httpContextAccessor, failureMetricHandler, exceptionMetricEmissionFilters);
                         });
                     });
             }

@@ -37,19 +37,14 @@ namespace Microsoft.Health.Fhir.Shared.Tests.Integration.Features.Operations
     public class FhirOperationDataStoreReindexTests : IClassFixture<FhirStorageTestsFixture>, IAsyncLifetime
     {
         private readonly IFhirOperationDataStore _operationDataStore;
-        private readonly IFhirStorageTestHelper _testHelper;
 
         public FhirOperationDataStoreReindexTests(FhirStorageTestsFixture fixture)
         {
-            _operationDataStore = fixture.OperationDataStore;
-            _testHelper = fixture.TestHelper;
+            _operationDataStore = fixture.TestSqlServerOperationDataStore ?? fixture.OperationDataStore;
         }
 
         public async Task InitializeAsync()
         {
-            await _testHelper.DeleteAllReindexJobRecordsAsync();
-            await CancelActiveReindexJobIfExists();
-
             GetTestQueueClient().ClearJobs();
 
             await AssertNoReindexJobsExist();
@@ -177,7 +172,7 @@ namespace Microsoft.Health.Fhir.Shared.Tests.Integration.Features.Operations
         public async Task GivenANonexistentReindexJob_WhenUpdatingTheReindexJob_ThenJobNotFoundExceptionShouldBeThrown()
         {
             // Create a local job record with a random ID that doesn't exist in the database or queue
-            var nonExistentJobRecord = new ReindexJobRecord(new List<string>(), new List<string>(), new List<string>())
+            var nonExistentJobRecord = new ReindexJobRecord(new List<string>())
             {
                 Id = "999999", // Use a non-existent ID
             };
@@ -247,7 +242,7 @@ namespace Microsoft.Health.Fhir.Shared.Tests.Integration.Features.Operations
 
         private async Task<ReindexJobRecord> InsertNewReindexJobRecordAsync(Action<ReindexJobRecord> jobRecordCustomizer = null)
         {
-            var jobRecord = new ReindexJobRecord(new List<string>(), new List<string>(), new List<string>());
+            var jobRecord = new ReindexJobRecord(new List<string>());
 
             jobRecordCustomizer?.Invoke(jobRecord);
 
@@ -289,7 +284,7 @@ namespace Microsoft.Health.Fhir.Shared.Tests.Integration.Features.Operations
             if (found && !string.IsNullOrEmpty(id))
             {
                 var cancelReindexHandler = new CancelReindexRequestHandler(_operationDataStore, DisabledFhirAuthorizationService.Instance);
-                await cancelReindexHandler.Handle(new CancelReindexRequest(id), cancellationToken);
+                await cancelReindexHandler.HandleAsync(new CancelReindexRequest(id), cancellationToken);
 
                 // Optionally, wait for the job to be marked as canceled
                 var job = await _operationDataStore.GetReindexJobByIdAsync(id, cancellationToken);

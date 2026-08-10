@@ -10,7 +10,7 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using EnsureThat;
-using MediatR;
+using Medino;
 using Microsoft.Extensions.Options;
 using Microsoft.Health.Fhir.Core.Configs;
 using Microsoft.Health.Fhir.Core.Features.Operations;
@@ -40,7 +40,7 @@ namespace Microsoft.Health.Fhir.Core.Features.Conformance
             _oidcDiscoveryService = oidcDiscoveryService;
         }
 
-        public async Task<GetSmartConfigurationResponse> Handle(GetSmartConfigurationRequest request, CancellationToken cancellationToken)
+        public async Task<GetSmartConfigurationResponse> HandleAsync(GetSmartConfigurationRequest request, CancellationToken cancellationToken)
         {
             EnsureArg.IsNotNull(request, nameof(request));
 
@@ -52,15 +52,20 @@ namespace Microsoft.Health.Fhir.Core.Features.Conformance
 
                     Uri authorizationEndpoint;
                     Uri tokenEndpoint;
+                    string issuer;
+                    string jwksUri;
 
                     if (_securityConfiguration.EnableAadSmartOnFhirProxy)
                     {
                         authorizationEndpoint = new Uri(request.BaseUri, "AadSmartOnFhirProxy/authorize");
                         tokenEndpoint = new Uri(request.BaseUri, "AadSmartOnFhirProxy/token");
+
+                        // Still resolve issuer and jwks_uri from OIDC discovery
+                        (_, _, issuer, jwksUri) = await _oidcDiscoveryService.ResolveEndpointsAsync(baseEndpoint, cancellationToken);
                     }
                     else
                     {
-                        (authorizationEndpoint, tokenEndpoint) = await _oidcDiscoveryService.ResolveEndpointsAsync(baseEndpoint, cancellationToken);
+                        (authorizationEndpoint, tokenEndpoint, issuer, jwksUri) = await _oidcDiscoveryService.ResolveEndpointsAsync(baseEndpoint, cancellationToken);
                     }
 
                     ICollection<string> capabilities = new List<string>(
@@ -110,6 +115,10 @@ namespace Microsoft.Health.Fhir.Core.Features.Conformance
                         "code",
                     };
 
+                    string introspectionEndpoint = !string.IsNullOrEmpty(_smartIdentityProviderConfiguration.Introspection)
+                        ? _smartIdentityProviderConfiguration.Introspection
+                        : new Uri(request.BaseUri, "connect/introspect").ToString();
+
                     return new GetSmartConfigurationResponse(
                         authorizationEndpoint,
                         tokenEndpoint,
@@ -119,9 +128,11 @@ namespace Microsoft.Health.Fhir.Core.Features.Conformance
                         grantTypesSupported,
                         tokenEndpointAuthMethodsSupported,
                         responseTypesSupported,
-                        _smartIdentityProviderConfiguration.Introspection,
+                        introspectionEndpoint,
                         _smartIdentityProviderConfiguration.Management,
-                        _smartIdentityProviderConfiguration.Revocation);
+                        _smartIdentityProviderConfiguration.Revocation,
+                        issuer,
+                        jwksUri);
                 }
                 catch (Exception e) when (e is ArgumentNullException || e is UriFormatException)
                 {

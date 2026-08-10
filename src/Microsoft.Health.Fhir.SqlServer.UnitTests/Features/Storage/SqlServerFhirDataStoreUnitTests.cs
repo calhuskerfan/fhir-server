@@ -5,22 +5,42 @@
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
+using System.Linq;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
+using Medino;
+using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Health.Fhir.Core.Features;
+using Microsoft.Extensions.Options;
+using Microsoft.Health.Core.Features.Context;
+using Microsoft.Health.Fhir.Core.Configs;
+using Microsoft.Health.Fhir.Core.Exceptions;
+using Microsoft.Health.Fhir.Core.Features.Context;
+using Microsoft.Health.Fhir.Core.Features.Definition;
+using Microsoft.Health.Fhir.Core.Features.Operations;
 using Microsoft.Health.Fhir.Core.Features.Operations.Import;
 using Microsoft.Health.Fhir.Core.Features.Persistence;
 using Microsoft.Health.Fhir.Core.Features.Persistence.Orchestration;
+using Microsoft.Health.Fhir.Core.Features.Search;
+using Microsoft.Health.Fhir.Core.Features.Search.Parameters;
+using Microsoft.Health.Fhir.Core.Features.Search.Registry;
 using Microsoft.Health.Fhir.Core.Models;
-using Microsoft.Health.Fhir.SqlServer.Features.Schema.Model;
+using Microsoft.Health.Fhir.Core.UnitTests.Extensions;
+using Microsoft.Health.Fhir.SqlServer.Features.Schema;
 using Microsoft.Health.Fhir.SqlServer.Features.Storage;
 using Microsoft.Health.Fhir.Tests.Common;
+using Microsoft.Health.SqlServer;
+using Microsoft.Health.SqlServer.Configs;
+using Microsoft.Health.SqlServer.Features.Client;
 using Microsoft.Health.SqlServer.Features.Schema;
 using Microsoft.Health.SqlServer.Features.Storage;
 using Microsoft.Health.Test.Utilities;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Xunit;
+using Task = System.Threading.Tasks.Task;
 
 namespace Microsoft.Health.Fhir.SqlServer.UnitTests.Features.Storage
 {
@@ -175,5 +195,281 @@ namespace Microsoft.Health.Fhir.SqlServer.UnitTests.Features.Storage
 
         // Note: GetJsonValue tests require instance creation which has complex dependencies
         // This method is indirectly tested through integration tests (UpdateTests, FhirPathPatchTests)
+
+        [Fact]
+        public async Task MergeAsync_OnSqlConflict_WhenEnlistedInAmbientTransaction_ThrowsResourceConflictExceptionWithoutRetry()
+        {
+            // Arrange
+            var sqlRetryService = Substitute.For<ISqlRetryService>();
+            var sqlException = SqlExceptionFactory.GetSqlException(SqlErrorCodes.Conflict, "SQL Conflict");
+            using var cts = new CancellationTokenSource();
+
+            sqlRetryService.ExecuteReaderAsync(
+                Arg.Any<SqlCommand>(),
+                Arg.Any<Func<SqlDataReader, ResourceWrapper>>(),
+                Arg.Any<ILogger>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<bool>())
+            .Throws(sqlException);
+
+            sqlRetryService
+                .TryLogEvent(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>())
+                .Returns(async callInfo =>
+                {
+                    // Tripwire: if the retry loop is incorrectly entered, cancellation makes the test fail fast rather than hang.
+                    cts.Cancel();
+                    await Task.CompletedTask;
+                });
+
+            // An ambient C# transaction (as opened by a sequential transaction bundle) is the condition that
+            // zombies on a SQL conflict, so the data store must fail fast rather than retry within it.
+            var transactionHandler = new SqlTransactionHandler();
+            using var transactionScope = transactionHandler.BeginTransaction();
+
+            var dataStore = CreateSqlServerFhirDataStore(sqlRetryService, transactionHandler);
+            var resources = CreateResourceWrapperOperations();
+
+            // Act & Assert
+            await Assert.ThrowsAsync<ResourceConflictException>(
+                () => dataStore.MergeAsync(resources, new MergeOptions(enlistTransaction: true, isBundleTransaction: true), cts.Token));
+
+            await sqlRetryService.DidNotReceive()
+                .TryLogEvent("MergeAsync", "Warn", Arg.Any<string>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
+        }
+
+        [Fact]
+        public async Task MergeAsync_OnSqlConflict_WhenEnlistTransactionWithoutAmbientScope_RetriesBeforeThrowing()
+        {
+            // Arrange - a regular (non-bundle) upsert sets enlistTransaction: true but runs without an ambient
+            // C# transaction scope. There is nothing to zombie, so a SQL conflict must still be retried
+            // (last-write-wins), not converted into a fail-fast 409.
+            var sqlRetryService = Substitute.For<ISqlRetryService>();
+            var sqlException = SqlExceptionFactory.GetSqlException(SqlErrorCodes.Conflict, "SQL Conflict");
+            using var cts = new CancellationTokenSource();
+
+            sqlRetryService.ExecuteReaderAsync(
+                Arg.Any<SqlCommand>(),
+                Arg.Any<Func<SqlDataReader, ResourceWrapper>>(),
+                Arg.Any<ILogger>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<bool>())
+            .Throws(sqlException);
+
+            sqlRetryService
+                .TryLogEvent(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>())
+                .Returns(async callInfo =>
+                {
+                    cts.Cancel();
+                    await Task.CompletedTask;
+                });
+
+            var dataStore = CreateSqlServerFhirDataStore(sqlRetryService);
+            var resources = CreateResourceWrapperOperations();
+
+            // Act & Assert
+            await Assert.ThrowsAsync<TaskCanceledException>(
+                () => dataStore.MergeAsync(resources, new MergeOptions(enlistTransaction: true, isBundleTransaction: false), cts.Token));
+
+            await sqlRetryService.Received(1)
+                .TryLogEvent("MergeAsync", "Warn", Arg.Any<string>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
+        }
+
+        [Fact]
+        public async Task MergeAsync_OnSqlConflict_WithDefaultOptions_RetriesBeforeThrowing()
+        {
+            // Arrange
+            var sqlRetryService = Substitute.For<ISqlRetryService>();
+            var sqlException = SqlExceptionFactory.GetSqlException(SqlErrorCodes.Conflict, "SQL Conflict");
+            using var cts = new CancellationTokenSource();
+
+            sqlRetryService.ExecuteReaderAsync(
+                Arg.Any<SqlCommand>(),
+                Arg.Any<Func<SqlDataReader, ResourceWrapper>>(),
+                Arg.Any<ILogger>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<bool>())
+            .Throws(sqlException);
+
+            // When trying to log events, a TaskCanceledException will be thrown.
+            sqlRetryService
+                .TryLogEvent(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>())
+                .Returns(async callInfo =>
+                {
+                    cts.Cancel();
+                    await Task.CompletedTask;
+                });
+
+            var dataStore = CreateSqlServerFhirDataStore(sqlRetryService);
+            var resources = CreateResourceWrapperOperations();
+
+            // Act & Assert
+            await Assert.ThrowsAsync<TaskCanceledException>(
+                () => dataStore.MergeAsync(resources, MergeOptions.Default, cts.Token));
+
+            await sqlRetryService.Received(1)
+                .TryLogEvent("MergeAsync", "Warn", Arg.Any<string>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
+        }
+
+        [Fact]
+        public async Task MergeAsync_OnSqlSurrogateIdCollision_RetryBeforeThrowing()
+        {
+            // Arrange
+            var sqlRetryService = Substitute.For<ISqlRetryService>();
+            var sqlException = SqlExceptionFactory.GetSqlException(FhirSqlErrorCodes.SurrogateIdCollision, "Surrogate Id Collision.");
+            using var cts = new CancellationTokenSource();
+
+            sqlRetryService.ExecuteReaderAsync(
+                Arg.Any<SqlCommand>(),
+                Arg.Any<Func<SqlDataReader, ResourceWrapper>>(),
+                Arg.Any<ILogger>(),
+                Arg.Any<string>(),
+                Arg.Any<CancellationToken>(),
+                Arg.Any<bool>())
+            .Throws(sqlException);
+
+            sqlRetryService
+                .TryLogEvent(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>())
+                .Returns(async callInfo =>
+                {
+                    cts.Cancel();
+                    await Task.CompletedTask;
+                });
+
+            var dataStore = CreateSqlServerFhirDataStore(sqlRetryService);
+            var resources = CreateResourceWrapperOperations();
+
+            // Act & Assert
+            await Assert.ThrowsAsync<TaskCanceledException>(
+                () => dataStore.MergeAsync(resources, MergeOptions.Default, cts.Token));
+
+            await sqlRetryService.Received(1)
+                .TryLogEvent("MergeAsync", "Warn", Arg.Any<string>(), Arg.Any<DateTime?>(), Arg.Any<CancellationToken>());
+        }
+
+        [Fact]
+        public void GivenKnownResourceType_WhenGettingResourceTypeId_ThenResourceTypeIdIsReturned()
+        {
+            var sqlRetryService = Substitute.For<ISqlRetryService>();
+            var model = GetModel(CreateSqlServerFhirDataStore(sqlRetryService));
+
+            short resourceTypeId = model.GetResourceTypeId("Patient");
+
+            Assert.Equal(1, resourceTypeId);
+        }
+
+        [Fact]
+        public void GivenUnknownResourceType_WhenGettingResourceTypeId_ThenResourceNotFoundExceptionIsThrown()
+        {
+            var sqlRetryService = Substitute.For<ISqlRetryService>();
+            var model = GetModel(CreateSqlServerFhirDataStore(sqlRetryService));
+
+            ResourceNotFoundException exception = Assert.Throws<ResourceNotFoundException>(() => model.GetResourceTypeId("patient"));
+
+            Assert.Contains("is not a known resource type", exception.Message, StringComparison.Ordinal);
+        }
+
+        private static SqlServerFhirDataStore CreateSqlServerFhirDataStore(ISqlRetryService sqlRetryService, SqlTransactionHandler sqlTransactionHandler = null)
+        {
+            sqlTransactionHandler ??= new SqlTransactionHandler();
+
+            ModelInfoProvider.SetProvider(MockModelInfoProviderBuilder.Create(FhirSpecification.R4).AddKnownTypes(KnownResourceTypes.Group).Build());
+
+            var schemaInfo = new SchemaInformation(SchemaVersionConstants.Min, SchemaVersionConstants.Max)
+            {
+                Current = SchemaVersionConstants.Max,
+            };
+
+            var searchService = Substitute.For<ISearchService>();
+            var searchParameterComparer = Substitute.For<ISearchParameterComparer<SearchParameterInfo>>();
+            var statusDataStore = Substitute.For<ISearchParameterStatusDataStore>();
+            var fhirDataStore = Substitute.For<IFhirDataStore>();
+            ISearchParameterDefinitionManager defManager = new SearchParameterDefinitionManager(
+                ModelInfoProvider.Instance,
+                Substitute.For<IMediator>(),
+                searchService.CreateMockScopeProvider(),
+                searchParameterComparer,
+                statusDataStore.CreateMockScopeProvider(),
+                fhirDataStore.CreateMockScopeProvider(),
+                NullLogger<SearchParameterDefinitionManager>.Instance);
+            FilebasedSearchParameterStatusDataStore statusStore = new FilebasedSearchParameterStatusDataStore(defManager, ModelInfoProvider.Instance);
+
+            var securityConfiguration = new SecurityConfiguration { PrincipalClaims = { "oid" } };
+
+            var model = new SqlServerFhirModel(
+                schemaInfo,
+                Substitute.For<ISearchParameterDefinitionManager>(),
+                () => statusStore,
+                Options.Create(securityConfiguration),
+                Substitute.For<IScopeProvider<SqlConnectionWrapperFactory>>(),
+                Substitute.For<IMediator>(),
+                sqlRetryService,
+                NullLogger<SqlServerFhirModel>.Instance);
+
+            typeof(SqlServerFhirModel)
+                .GetField("_resourceTypeToId", BindingFlags.NonPublic | BindingFlags.Instance)
+                .SetValue(model, new Dictionary<string, short>(StringComparer.Ordinal) { { "Patient", 1 } });
+
+            typeof(SqlServerFhirModel)
+                .GetField("_highestInitializedVersion", BindingFlags.NonPublic | BindingFlags.Instance)
+                .SetValue(model, schemaInfo.Current);
+
+            var storeClient = new SqlStoreClient(sqlRetryService, NullLogger<SqlStoreClient>.Instance, schemaInfo);
+
+            CoreFeatureConfiguration coreFeatureConfiguration = new CoreFeatureConfiguration();
+            BundleConfiguration bundleConfiguration = new BundleConfiguration();
+
+            var sqlConnection = new SqlConnection();
+            var sqlConnectionBuilder = Substitute.For<ISqlConnectionBuilder>();
+            sqlConnectionBuilder.GetSqlConnectionAsync(Arg.Any<string>(), Arg.Any<int?>(), Arg.Any<CancellationToken>()).ReturnsForAnyArgs((x) => Task.FromResult(new SqlConnection()));
+            SqlRetryLogicBaseProvider sqlRetryLogicBaseProvider = SqlConfigurableRetryFactory.CreateFixedRetryProvider(new SqlClientRetryOptions().Settings);
+
+            var sqlServerDataStoreConfiguration = new SqlServerDataStoreConfiguration() { ConnectionString = sqlConnection.ConnectionString };
+
+            var sqlConnectionWrapperFactory = new SqlConnectionWrapperFactory(sqlTransactionHandler, sqlConnectionBuilder, sqlRetryLogicBaseProvider, Options.Create(sqlServerDataStoreConfiguration));
+
+            var dataStore = new SqlServerFhirDataStore(
+                model,
+                new SearchParameterToSearchValueTypeMap(),
+                Options.Create(coreFeatureConfiguration),
+                new BundleOrchestrator(
+                    Options.Create(bundleConfiguration),
+                    NullLogger<BundleOrchestrator>.Instance),
+                sqlRetryService,
+                sqlConnectionWrapperFactory,
+                sqlTransactionHandler,
+                Substitute.For<ICompressedRawResourceConverter>(),
+                NullLogger<SqlServerFhirDataStore>.Instance,
+                schemaInfo,
+                ModelInfoProvider.Instance,
+                Substitute.For<RequestContextAccessor<IFhirRequestContext>>(),
+                Substitute.For<IImportErrorSerializer>(),
+                storeClient);
+
+            return dataStore;
+        }
+
+        private static SqlServerFhirModel GetModel(SqlServerFhirDataStore dataStore)
+        {
+            var modelField = typeof(SqlServerFhirDataStore).GetField("_model", BindingFlags.NonPublic | BindingFlags.Instance);
+
+            if (modelField == null)
+            {
+                throw new InvalidOperationException("Field '_model' not found");
+            }
+
+            return (SqlServerFhirModel)modelField.GetValue(dataStore);
+        }
+
+        private static List<ResourceWrapperOperation> CreateResourceWrapperOperations()
+        {
+            var wrapper = CreateResourceWrapper("{\"resourceType\":\"Patient\",\"id\":\"123\"}");
+            return new List<ResourceWrapperOperation>
+            {
+                new ResourceWrapperOperation(wrapper, allowCreate: true, keepHistory: false, weakETag: null, requireETagOnUpdate: false, keepVersion: false, bundleResourceContext: null),
+            };
+        }
     }
 }

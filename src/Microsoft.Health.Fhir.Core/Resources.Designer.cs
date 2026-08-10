@@ -160,7 +160,7 @@ namespace Microsoft.Health.Fhir.Core {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Changes to search parameters is not allowed while a reindex job is ongoing.  Wait for the reindex job with Id: {0} to finish, or cancel it..
+        ///   Looks up a localized string similar to Changes to search parameters are not allowed while a reindex job is in progress. Wait for the reindex job with Id: {0} to finish, or cancel it..
         /// </summary>
         internal static string ChangesToSearchParametersNotAllowedWhileReindexing {
             get {
@@ -833,6 +833,15 @@ namespace Microsoft.Health.Fhir.Core {
         internal static string InvalidEverythingOperationPhase {
             get {
                 return ResourceManager.GetString("InvalidEverythingOperationPhase", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to Export operation parameter &apos;{0}&apos; was out of the range of valid values. Please specify a different value within a range &apos;{1}&apos; - &apos;{2}&apos;..
+        /// </summary>
+        internal static string InvalidExportParameterValue {
+            get {
+                return ResourceManager.GetString("InvalidExportParameterValue", resourceCulture);
             }
         }
         
@@ -1584,6 +1593,15 @@ namespace Microsoft.Health.Fhir.Core {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Optimistic concurrency conflict detected while writing custom search parameter(s). Make sure that custom search parameters are not written in parallel. Consider sequential writes or a bundle..
+        /// </summary>
+        internal static string SearchParameterConcurrencyConflict {
+            get {
+                return ResourceManager.GetString("SearchParameterConcurrencyConflict", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to SearchParameter[{0}].resource.base is not defined..
         /// </summary>
         internal static string SearchParameterDefinitionBaseNotDefined {
@@ -1692,6 +1710,15 @@ namespace Microsoft.Health.Fhir.Core {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Search Parameter URL {0} exceeds the maximum length limit of {1}.
+        /// </summary>
+        internal static string SearchParameterDefinitionInvalidUriExceedsMaxLength {
+            get {
+                return ResourceManager.GetString("SearchParameterDefinitionInvalidUriExceedsMaxLength", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to A search parameter with Uri &apos;{0}&apos; was not found..
         /// </summary>
         internal static string SearchParameterDefinitionNotFound {
@@ -1710,7 +1737,7 @@ namespace Microsoft.Health.Fhir.Core {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to The search parameter with Uri '{0}' is defined by the FHIR specification and cannot be updated or deleted. Custom search parameters must use a different URL..
+        ///   Looks up a localized string similar to The search parameter with Uri &apos;{0}&apos; is defined by the FHIR specification and cannot be updated or deleted. Custom search parameters must use a different URL..
         /// </summary>
         internal static string SearchParameterDefinitionSystemDefined {
             get {
@@ -1917,6 +1944,15 @@ namespace Microsoft.Health.Fhir.Core {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to Include result was truncated. Iterative include results cannot be paged though, please narrow your search..
+        /// </summary>
+        internal static string TruncatedIncludeMessageForIterativeInclude {
+            get {
+                return ResourceManager.GetString("TruncatedIncludeMessageForIterativeInclude", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to The _typeFilter segment &apos;{0}&apos; could not be parsed..
         /// </summary>
         internal static string TypeFilterUnparseable {
@@ -1994,6 +2030,15 @@ namespace Microsoft.Health.Fhir.Core {
         internal static string UnsupportedBulkUpdateOperation {
             get {
                 return ResourceManager.GetString("UnsupportedBulkUpdateOperation", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The provided Bundle type is not supported. Supported values are: batch and transaction..
+        /// </summary>
+        internal static string UnsupportedBundleType {
+            get {
+                return ResourceManager.GetString("UnsupportedBundleType", resourceCulture);
             }
         }
         
