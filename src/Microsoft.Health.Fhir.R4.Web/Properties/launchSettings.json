@@ -72,7 +72,7 @@
                 "MongoDb:ConnectionString": "mongodb://admin:iwas%40%4004@localhost:27017/",
                 "FhirServer:CoreFeatures:SupportsTransaction": "true"
             },
-            "applicationUrl": "https://localhost:8081/"
+            "applicationUrl": "https://localhost:8082/"
         }
     }
 }

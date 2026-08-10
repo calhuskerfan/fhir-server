@@ -79,5 +79,10 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage.Queues
         {
             throw new NotImplementedException();
         }
+
+        public Task<JobInfo> EnqueueWithStatusAsync(byte queueType, long groupId, string definition, JobStatus jobStatus, string result, DateTime? startDate, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
     }
 }
