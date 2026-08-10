@@ -93,25 +93,23 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
         {
             var resourceType = key.ResourceType;
             var resourceId = key.Id;
-            var version = 1;
             var isHistory = false;
             var isRawResourceMetaSet = true;
 
-            /*
-            TODO:  Need to review these
-            var searchParamHash = reader.Read(VLatest.Resource.SearchParamHash, 8);
-            var requestMethod = readRequestMethod ? reader.Read(VLatest.Resource.RequestMethod, 9) : null;
-            var resourceSurrogateId = 5108658606258160320;
-            var rawResourceBytes = reader.GetSqlBytes(6).Value;
-            var resourceTypeId = 103;
-            */
-
-            // set up the filters
-            // TODOCJH:  Should we also filter on resource type,
-            // the resource.id should be sufficient and unique across the system
             var filter = Builders<BsonDocument>
                 .Filter
-                .Eq("resource.id", resourceId);
+                .Eq(FieldNameConstants.ResourceId, resourceId);
+
+            filter = filter & Builders<BsonDocument>.Filter.Eq(FieldNameConstants.ResourceType, resourceType);
+
+            if (string.IsNullOrEmpty(key.VersionId))
+            {
+                filter = filter & Builders<BsonDocument>.Filter.Eq(FieldNameConstants.IsLatest, true);
+            }
+            else
+            {
+                filter = filter & Builders<BsonDocument>.Filter.Eq(FieldNameConstants.Version, key.VersionId);
+            }
 
             var document = await _dataStoreConfiguration
                 .GetCollection()
@@ -125,10 +123,10 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
 
             return new ResourceWrapper(
                 resourceId,
-                version.ToString(CultureInfo.InvariantCulture),
-                key.ResourceType,
+                document[FieldNameConstants.Version].ToString(),
+                resourceType,
                 new RawResource(
-                    document[FieldNameConstants.Resource].ToString(),
+                    document[FieldNameConstants.Resource].ToJson(),
                     FhirResourceFormat.Json,
                     isMetaSet: isRawResourceMetaSet),
                 null,
@@ -162,11 +160,13 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
 
             var filter = Builders<BsonDocument>
                 .Filter
-                .Eq($"{FieldNameConstants.Resource}.{FieldNameConstants.Id}", resourceId);
+                .Eq(FieldNameConstants.ResourceId, resourceId);
+
+            filter = filter & Builders<BsonDocument>.Filter.Eq(FieldNameConstants.ResourceType, resourceType);
 
             var deleteResults = await _dataStoreConfiguration
                 .GetCollection()
-                .DeleteOneAsync(filter, cancellationToken);
+                .DeleteManyAsync(filter, cancellationToken);
         }
 
         public async Task<MergeOutcome> MergeAsync(IReadOnlyList<ResourceWrapperOperation> resources, CancellationToken cancellationToken)
@@ -217,60 +217,54 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
 
                 existingResources.TryGetValue(resource.ToResourceKey(true), out var existingResource);
 
-                if (existingResource == null)
+                var currentVersion = existingResource == null ? 1 : GetNextVersion(existingResource);
+                var versionId = currentVersion.ToString(CultureInfo.InvariantCulture);
+
+                var previousLatestFilter = Builders<BsonDocument>
+                    .Filter
+                    .Eq(FieldNameConstants.ResourceId, resource.ResourceId);
+
+                previousLatestFilter = previousLatestFilter & Builders<BsonDocument>.Filter.Eq(FieldNameConstants.ResourceType, resource.ResourceTypeName);
+                previousLatestFilter = previousLatestFilter & Builders<BsonDocument>.Filter.Eq(FieldNameConstants.IsLatest, true);
+
+                await _dataStoreConfiguration
+                    .GetCollection()
+                    .UpdateManyAsync(previousLatestFilter, Builders<BsonDocument>.Update.Set(FieldNameConstants.IsLatest, false), cancellationToken: cancellationToken);
+
+                var doc = new BsonDocument
                 {
-                    var doc = new JObject
-                    {
-                        {
-                            FieldNameConstants.Resource,
-                            JToken.Parse(resourceExt.Wrapper.RawResource.Data)
-                        },
-                    };
+                    { FieldNameConstants.ResourceId, new BsonString(resource.ResourceId) },
+                    { FieldNameConstants.ResourceType, new BsonString(resource.ResourceTypeName) },
+                    { FieldNameConstants.Version, new BsonString(versionId) },
+                    { FieldNameConstants.IsLatest, true },
+                    { FieldNameConstants.IsDeleted, resourceExt.Wrapper.IsDeleted },
+                    { FieldNameConstants.LastModified, new BsonDateTime(resource.LastModified.ToUniversalTime().UtcDateTime) },
+                    { FieldNameConstants.Resource, JObject.Parse(resourceExt.Wrapper.RawResource.Data).ToBsonDocument() },
+                    { FieldNameConstants.SearchIndexes, GetSearchIndexes(resourceExt.Wrapper.SearchIndices) },
+                };
 
-                    BsonDocument document = doc.ToBsonDocument();
+                await _dataStoreConfiguration
+                    .GetCollection()
+                    .InsertOneAsync(doc, new InsertOneOptions(), cancellationToken);
 
-                    document.Add(FieldNameConstants.IsDeleted, false);
-
-                    document.AddRange(new BsonDocument(
-                        FieldNameConstants.SearchIndexes,
-                        GetSearchIndexes(resourceExt.Wrapper.SearchIndices)));
-
-                    await _dataStoreConfiguration
-                        .GetCollection()
-                        .InsertOneAsync(document, new InsertOneOptions(), cancellationToken);
-
-                    results.Add(
-                        identifier,
-                        new DataStoreOperationOutcome(new UpsertOutcome(resourceExt.Wrapper, SaveOutcomeType.Created)));
-                }
-                else
-                {
-                    // TODOCJH: Implement Update
-                    // ok, we are updating an existing resource
-                    // for now we are just going to flush and fill the resource and search indexes
-
-                    string text = resourceExt.Wrapper.RawResource.Data;
-
-                    FilterDefinition<BsonDocument> filter = Builders<BsonDocument>
-                        .Filter
-                        .Eq($"{FieldNameConstants.Resource}.{FieldNameConstants.Id}", resource.ResourceId);
-
-                    UpdateDefinition<BsonDocument> update = Builders<BsonDocument>.Update
-                        .Set(FieldNameConstants.Resource, JObject.Parse(text).ToBsonDocument())
-                        .Set(FieldNameConstants.SearchIndexes, GetSearchIndexes(resourceExt.Wrapper.SearchIndices))
-                        .Set(FieldNameConstants.IsDeleted, resourceExt.Wrapper.IsDeleted);
-
-                    UpdateResult updateResult = await _dataStoreConfiguration
-                        .GetCollection()
-                        .UpdateOneAsync(filter, update, null, cancellationToken);
-
-                    results.Add(
-                        identifier,
-                        new DataStoreOperationOutcome(new UpsertOutcome(resourceExt.Wrapper, SaveOutcomeType.Updated)));
-                }
+                results.Add(
+                    identifier,
+                    new DataStoreOperationOutcome(new UpsertOutcome(resourceExt.Wrapper, existingResource == null ? SaveOutcomeType.Created : SaveOutcomeType.Updated)));
             }
 
             return results;
+        }
+
+        private static int GetNextVersion(ResourceWrapper existingResource)
+        {
+            if (existingResource == null)
+            {
+                return 1;
+            }
+
+            return int.TryParse(existingResource.Version, NumberStyles.Integer, CultureInfo.InvariantCulture, out int version)
+                ? version + 1
+                : 1;
         }
 
         private BsonArray GetSearchIndexes(IReadOnlyCollection<SearchIndexEntry> searchIndices)

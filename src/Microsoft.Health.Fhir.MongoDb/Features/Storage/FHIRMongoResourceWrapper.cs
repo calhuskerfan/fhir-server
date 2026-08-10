@@ -38,18 +38,26 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
 
         public static FHIRMongoResourceWrapper FromBsonDocument(BsonDocument entry)
         {
-            var version = 1;
             var isHistory = false;
             var isRawResourceMetaSet = true;
 
             var isDeleted = entry[FieldNameConstants.IsDeleted].ToBoolean();
-
-            string rawResource = entry[FieldNameConstants.Resource].ToString();
+            var resourceDocument = entry[FieldNameConstants.Resource].ToBsonDocument();
+            var resourceId = entry.Contains(FieldNameConstants.ResourceId)
+                ? entry[FieldNameConstants.ResourceId].AsString
+                : resourceDocument[FieldNameConstants.Id].AsString;
+            var resourceType = entry.Contains(FieldNameConstants.ResourceType)
+                ? entry[FieldNameConstants.ResourceType].AsString
+                : resourceDocument[FieldNameConstants.ResourceType].AsString;
+            var version = entry.Contains(FieldNameConstants.Version)
+                ? entry[FieldNameConstants.Version].ToString()
+                : "1";
+            var rawResource = entry[FieldNameConstants.Resource].ToJson();
 
             var resourceWrapper = new FHIRMongoResourceWrapper(
-                entry[FieldNameConstants.Resource][FieldNameConstants.Id].ToString(),
-                version.ToString(CultureInfo.InvariantCulture),
-                entry[FieldNameConstants.Resource][FieldNameConstants.ResourceType].ToString(),
+                resourceId,
+                version,
+                resourceType,
                 new RawResource(rawResource, FhirResourceFormat.Json, isMetaSet: isRawResourceMetaSet),
                 null,
                 DateTimeOffset.Now,

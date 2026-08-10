@@ -16,6 +16,7 @@ using Microsoft.Health.Fhir.MongoDb.Configs;
 using Microsoft.Health.Fhir.MongoDb.Features.Storage;
 using Microsoft.Health.Fhir.Tests.Common;
 using Microsoft.Health.Test.Utilities;
+using MongoDB.Bson;
 using NSubstitute;
 using Xunit;
 
@@ -34,6 +35,33 @@ namespace Microsoft.Health.Fhir.MongoDb.UnitTests.Extensions
             Assert.NotNull(mergeOutcome);
             Assert.Equal(MergeOutcomeFinalState.Unchanged, mergeOutcome.State);
             Assert.Empty(mergeOutcome.Results);
+        }
+
+        [Fact]
+        public void FromBsonDocument_UsesVersionedMetadata_WhenPresent()
+        {
+            var entry = new BsonDocument
+            {
+                { FieldNameConstants.ResourceId, "patient-1" },
+                { FieldNameConstants.ResourceType, "Patient" },
+                { FieldNameConstants.Version, "2" },
+                { FieldNameConstants.IsDeleted, false },
+                {
+                    FieldNameConstants.Resource,
+                    new BsonDocument
+                    {
+                        { "id", "patient-1" },
+                        { "resourceType", "Patient" },
+                        { "name", new BsonArray { new BsonDocument { { "family", "Contoso" } } } },
+                    }
+                },
+            };
+
+            var wrapper = FHIRMongoResourceWrapper.FromBsonDocument(entry);
+
+            Assert.Equal("patient-1", wrapper.ResourceId);
+            Assert.Equal("2", wrapper.Version);
+            Assert.Equal("Patient", wrapper.ResourceTypeName);
         }
 
         private static MongoFhirDataStore CreateDataStore()
