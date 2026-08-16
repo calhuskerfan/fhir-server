@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.Health.Fhir.Core.Features.Search;
 using MongoDB.Bson;
 using MongoDB.Driver;
 
@@ -16,9 +17,9 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
     {
         public QueryAssembler Assembler { get; set; } = new QueryAssembler();
 
-        public BsonDocument GetFilters()
+        public BsonDocument GetFilters(SearchOptions searchOptions)
         {
-            return Assembler.RenderFilters();
+            return Assembler.RenderFilters(searchOptions);
         }
     }
 }

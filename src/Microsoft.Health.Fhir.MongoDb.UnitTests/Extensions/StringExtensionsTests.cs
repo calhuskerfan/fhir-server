@@ -13,6 +13,7 @@ using Xunit;
 namespace Microsoft.Health.Fhir.MongoDb.UnitTests.Extensions
 {
     [Trait(Traits.OwningTeam, OwningTeam.Fhir)]
+    [Trait(Traits.Category, Categories.Operations)]
     public class StringExtensionsTests
     {
     }

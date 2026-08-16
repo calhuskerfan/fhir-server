@@ -83,6 +83,11 @@ namespace Microsoft.Extensions.DependencyInjection
                 .AsSelf()
                 .AsImplementedInterfaces();
 
+            services.Add<MongoDbDeletionServiceDataStoreFactory>()
+                .Scoped()
+                .AsSelf()
+                .AsImplementedInterfaces();
+
             services.Add<MongoDbTransactionHandler>()
                 .Scoped()
                 .AsSelf()

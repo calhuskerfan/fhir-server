@@ -33,7 +33,7 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
 
             searchOptions.Expression?.AcceptVisitor(expressionQueryBuilder, ctx);
 
-            return ctx.GetFilters();
+            return ctx.GetFilters(searchOptions);
         }
     }
 }

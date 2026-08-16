@@ -212,6 +212,7 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
 
             foreach (var resourceExt in resources) // if list contains more that one version per resource it must be sorted by id and last updated DESC.
             {
+                // Resource represents what we are trying to save to the datastore
                 ResourceWrapper resource = resourceExt.Wrapper;
                 DataStoreOperationIdentifier identifier = resourceExt.GetIdentifier();
 
@@ -227,9 +228,15 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
                 previousLatestFilter = previousLatestFilter & Builders<BsonDocument>.Filter.Eq(FieldNameConstants.ResourceType, resource.ResourceTypeName);
                 previousLatestFilter = previousLatestFilter & Builders<BsonDocument>.Filter.Eq(FieldNameConstants.IsLatest, true);
 
+                // update any exiting records to IsLatest = false.
                 await _dataStoreConfiguration
                     .GetCollection()
                     .UpdateManyAsync(previousLatestFilter, Builders<BsonDocument>.Update.Set(FieldNameConstants.IsLatest, false), cancellationToken: cancellationToken);
+
+                // ok, lets update the meta-data
+                // TODOCJH:  Feels like we are duplicating here, but the metadata is natively sent in the response
+                // where as the storage wrapper, version, property is not.
+                var resourceDocument = UpdateResourceMetadata(JObject.Parse(resourceExt.Wrapper.RawResource.Data), resourceExt.Wrapper, versionId);
 
                 var doc = new BsonDocument
                 {
@@ -239,7 +246,7 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
                     { FieldNameConstants.IsLatest, true },
                     { FieldNameConstants.IsDeleted, resourceExt.Wrapper.IsDeleted },
                     { FieldNameConstants.LastModified, new BsonDateTime(resource.LastModified.ToUniversalTime().UtcDateTime) },
-                    { FieldNameConstants.Resource, JObject.Parse(resourceExt.Wrapper.RawResource.Data).ToBsonDocument() },
+                    { FieldNameConstants.Resource, resourceDocument.ToBsonDocument() },
                     { FieldNameConstants.SearchIndexes, GetSearchIndexes(resourceExt.Wrapper.SearchIndices) },
                 };
 
@@ -265,6 +272,26 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
             return int.TryParse(existingResource.Version, NumberStyles.Integer, CultureInfo.InvariantCulture, out int version)
                 ? version + 1
                 : 1;
+        }
+
+        internal static JObject UpdateResourceMetadata(JObject resource, ResourceWrapper wrapper, string versionId)
+        {
+            if (resource == null || wrapper == null)
+            {
+                return resource;
+            }
+
+            var meta = resource["meta"] as JObject;
+            if (meta == null)
+            {
+                meta = new JObject();
+                resource["meta"] = meta;
+            }
+
+            meta["versionId"] = versionId;
+            meta["lastUpdated"] = wrapper.LastModified.ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss.FFFFFFFK", CultureInfo.InvariantCulture);
+
+            return resource;
         }
 
         private BsonArray GetSearchIndexes(IReadOnlyCollection<SearchIndexEntry> searchIndices)

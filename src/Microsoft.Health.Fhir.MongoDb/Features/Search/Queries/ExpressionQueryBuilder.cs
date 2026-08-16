@@ -60,25 +60,7 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
         {
             string field = $"Value.{GetFieldName(expression)}";
 
-            BsonValue value;
-
-            if (expression.Value is decimal dv)
-            {
-                value = BsonDecimal128.Create(dv);
-            }
-            else if (expression.Value is System.DateTimeOffset)
-            {
-                var dto = (System.DateTimeOffset)expression.Value;
-                value = new BsonDateTime(dto.DateTime);
-            }
-            else if (expression.Value is string sv)
-            {
-                value = sv;
-            }
-            else
-            {
-                throw new NotSupportedException($"{expression.Value}");
-            }
+            BsonValue value = ConvertToBsonValue(expression.Value);
 
             context.Assembler.AddCondition(new BsonDocument(
                 field,
@@ -118,14 +100,30 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
 
                     break;
                 case SearchParameterNames.Id:
-                    // expression.Expression.AcceptVisitor(this, context.WithFieldNameOverride((n, i) => KnownResourceWrapperProperties.ResourceId));
-                    throw new NotImplementedException();
+                    context.Assembler
+                        .AddFilter(
+                        new BsonDocument(
+                            $"{FieldNameConstants.Resource}.{FieldNameConstants.Id}",
+                            ((StringExpression)expression.Expression).Value));
+                    break;
                 case SearchParameterNames.LastUpdated:
-                    // For LastUpdate queries, the LastModified property on the root is
-                    // more performant than the searchIndices _lastUpdated.st and _lastUpdate.et
-                    // we will override the mapping for that
-                    // expression.Expression.AcceptVisitor(this, context.WithFieldNameOverride((n, i) => SearchValueConstants.LastModified));
-                    throw new NotImplementedException();
+                    // For LastUpdated queries, the root lastModified property is more performant
+                    // than scanning the _lastUpdated search index entries.
+                    if (expression.Expression is BinaryExpression binaryExpression)
+                    {
+                        BsonValue value = ConvertToBsonValue(binaryExpression.Value);
+                        context.Assembler.AddFilter(new BsonDocument(
+                            FieldNameConstants.LastModified,
+                            new BsonDocument(
+                                GetMappedValue(BinaryOperatorMapping, binaryExpression.BinaryOperator),
+                                value)));
+                    }
+                    else
+                    {
+                        throw new NotSupportedException($"Unsupported LastUpdated expression type: {expression.Expression.GetType().Name}");
+                    }
+
+                    break;
                 case SearchValueConstants.WildcardReferenceSearchParameterName:
                     // This is an internal search parameter that matches any reference search parameter.
                     // It is used for wildcard revinclude queries
@@ -177,6 +175,31 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
             throw new InvalidOperationException();
         }
 
+        private static BsonValue ConvertToBsonValue(object value)
+        {
+            if (value is decimal dv)
+            {
+                return BsonDecimal128.Create(dv);
+            }
+
+            if (value is DateTimeOffset dto)
+            {
+                return new BsonDateTime(dto.DateTime);
+            }
+
+            if (value is System.DateTime dt)
+            {
+                return new BsonDateTime(dt);
+            }
+
+            if (value is string sv)
+            {
+                return sv;
+            }
+
+            throw new NotSupportedException($"{value}");
+        }
+
         // VisitString
         public object? VisitString(StringExpression expression, ExpressionQueryBuilderContext context)
         {
@@ -201,16 +224,28 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
             {
                 value = new BsonRegularExpression("/" + expression.Value + "/");
             }
+            else if (expression.StringOperator == StringOperator.EndsWith)
+            {
+                value = new BsonRegularExpression(".*" + expression.Value + "$", options: "i");
+            }
+            else if (expression.StringOperator == StringOperator.NotContains)
+            {
+                value = new BsonDocument("$not", new BsonRegularExpression(".*" + expression.Value + ".*", options: "i"));
+            }
+            else if (expression.StringOperator == StringOperator.NotStartsWith)
+            {
+                value = new BsonDocument("$not", new BsonRegularExpression("^" + expression.Value + ".*", options: "i"));
+            }
+            else if (expression.StringOperator == StringOperator.NotEndsWith)
+            {
+                value = new BsonDocument("$not", new BsonRegularExpression(".*" + expression.Value + "$", options: "i"));
+            }
+            else if (expression.StringOperator == StringOperator.LeftSideStartsWith)
+            {
+                value = new BsonRegularExpression("^" + expression.Value + ".*", options: "i");
+            }
             else
             {
-                /*
-                EndsWith,
-                NotContains,
-                NotEndsWith,
-                NotStartsWith,
-                LeftSideStartsWith,
-                */
-
                 throw new InvalidOperationException($"{expression.StringOperator}");
             }
 

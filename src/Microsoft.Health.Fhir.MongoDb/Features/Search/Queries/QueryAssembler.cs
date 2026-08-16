@@ -3,6 +3,7 @@
 // Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // -------------------------------------------------------------------------------------------------
 using DotLiquid;
+using Microsoft.Health.Fhir.Core.Features.Search;
 using Microsoft.Health.Fhir.Core.Features.Search.Expressions;
 using Microsoft.Health.Fhir.MongoDb.Features.Storage;
 using MongoDB.Bson;
@@ -140,13 +141,33 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
 
         // Renders the filters into a BsonDocument that is submitted to the MongoEngine to
         // satisfy the query
-        public BsonDocument RenderFilters()
+        public BsonDocument RenderFilters(SearchOptions searchOptions)
         {
             BsonArray arr = [.. Filters];
 
-            // NOTECJH: do not include deleted resource records
-            // Would there be a need to make this configurable ?
-            arr.Add(new BsonDocument(FieldNameConstants.IsDeleted, false));
+            // not going to support this one just yet, but we will need to support it at some point
+            /*
+             * if ((searchOptions.ResourceVersionTypes & ResourceVersionType.SoftDeleted) == ResourceVersionType.SoftDeleted)
+            {
+                arr.Add(new BsonDocument(FieldNameConstants.IsDeleted, false));
+            }
+            */
+
+            // OK, this is VERY UGLY, but it works
+
+            if (!(searchOptions.ResourceVersionTypes.HasFlag(ResourceVersionType.Latest)
+                && searchOptions.ResourceVersionTypes.HasFlag(ResourceVersionType.History)))
+            {
+                if ((searchOptions.ResourceVersionTypes & ResourceVersionType.Latest) == ResourceVersionType.Latest)
+                {
+                    arr.Add(new BsonDocument(FieldNameConstants.IsLatest, true));
+                }
+
+                if ((searchOptions.ResourceVersionTypes & ResourceVersionType.History) == ResourceVersionType.History)
+                {
+                    arr.Add(new BsonDocument(FieldNameConstants.IsLatest, false));
+                }
+            }
 
             // $and is (should be) the _root
             return new BsonDocument(_bsonAndOperator, arr);
