@@ -292,7 +292,9 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
 
         public object VisitInclude(IncludeExpression expression, ExpressionQueryBuilderContext context)
         {
-            throw new InvalidOperationException($"Include expression should have been removed before reaching {nameof(ExpressionQueryBuilder)}.");
+            // Include expressions are handled by the search service after the main match set is evaluated.
+            // This builder is responsible for predicate generation only.
+            return null;
         }
 
         public object VisitMissingField(MissingFieldExpression expression, ExpressionQueryBuilderContext context)

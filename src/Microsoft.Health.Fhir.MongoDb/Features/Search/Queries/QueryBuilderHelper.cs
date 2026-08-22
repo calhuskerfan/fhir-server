@@ -11,6 +11,7 @@ using EnsureThat;
 using Microsoft.Health.Fhir.Core.Features.Search;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
+using MongoDB.Driver;
 
 namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
 {
@@ -23,7 +24,7 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
         // returns a BSON document containing the
         // filter specification from the
         // search option expressions
-        public BsonDocument BuildFilterSpec(SearchOptions searchOptions)
+        public MongoQuerySpec BuildFilterSpec(SearchOptions searchOptions)
         {
             EnsureArg.IsNotNull(searchOptions, nameof(searchOptions));
 
@@ -33,7 +34,21 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
 
             searchOptions.Expression?.AcceptVisitor(expressionQueryBuilder, ctx);
 
-            return ctx.GetFilters(searchOptions);
+            var filters = ctx.GetFilters(searchOptions);
+
+            SortDefinition<BsonDocument> sortDefinition = null;
+
+            if (searchOptions.Sort.Any())
+            {
+                // BUGCJH: Start With One sort, but we should support multiple sorts in the future
+                var sort = searchOptions.Sort[0];
+
+                sortDefinition = sort.sortOrder == SortOrder.Ascending
+                    ? Builders<BsonDocument>.Sort.Ascending(sort.searchParameterInfo.Code)
+                    : Builders<BsonDocument>.Sort.Descending(sort.searchParameterInfo.Code);
+            }
+
+            return new MongoQuerySpec(filters, sortDefinition);
         }
     }
 }

@@ -17,7 +17,7 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1852:Seal internal types", Justification = "Pending")]
     internal class QueryBuilder : IQueryBuilder
     {
-        public BsonDocument BuildFilterSpec(SearchOptions searchOptions)
+        public MongoQuerySpec BuildFilterSpec(SearchOptions searchOptions)
         {
             return new QueryBuilderHelper().BuildFilterSpec(searchOptions);
         }

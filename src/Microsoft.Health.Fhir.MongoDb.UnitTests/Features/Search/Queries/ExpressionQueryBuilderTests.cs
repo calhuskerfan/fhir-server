@@ -112,6 +112,27 @@ namespace Microsoft.Health.Fhir.MongoDb.UnitTests.Features.Search.Queries
         }
 
         [Fact]
+        public void VisitInclude_WithIncludeExpression_DoesNotThrow()
+        {
+            var builder = new ExpressionQueryBuilder();
+            var context = new ExpressionQueryBuilderContext();
+            var parameter = new SearchParameterInfo("subject", "subject");
+            var expression = new IncludeExpression(
+                new[] { "Observation" },
+                parameter,
+                "Observation",
+                "Patient",
+                null,
+                false,
+                false,
+                false);
+
+            var exception = Record.Exception(() => builder.VisitInclude(expression, context));
+
+            Assert.Null(exception);
+        }
+
+        [Fact]
         public void VisitSearchParameter_WithLastUpdated_UsesResourceLastModifiedField()
         {
             var builder = new ExpressionQueryBuilder();

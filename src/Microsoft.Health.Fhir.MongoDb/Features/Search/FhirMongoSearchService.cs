@@ -27,6 +27,7 @@ using Microsoft.Health.Fhir.ValueSets;
 using MongoDB.Bson;
 using MongoDB.Driver;
 using MongoDB.Driver.Search;
+using Newtonsoft.Json.Linq;
 
 namespace Microsoft.Health.Fhir.MongoDb.Features.Search
 {
@@ -71,18 +72,19 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search
         // SearchImpl entrypoint
         private async Task<SearchResult> SearchImpl(SearchOptions searchOptions, CancellationToken cancellationToken)
         {
-#if SEARCH_INCLUDE_FUNCTIONALITY
-            // TODOCJH:  This is using the Cosmos Implementation as a guide.
-            // validate !
-            // we're going to mutate searchOptions, so clone it first so the caller of this method does not see the changes.
             searchOptions = searchOptions.Clone();
 
-            // Starting with the Cosmos approach first to see where it takes us.
-            bool hasIncludeOrRevIncludeExpressions = searchOptions.Expression.ExtractIncludeAndChainedExpressions(
-                out Expression expressionWithoutIncludes,
-                out IReadOnlyList<IncludeExpression> includeExpressions,
-                out IReadOnlyList<IncludeExpression> revIncludeExpressions,
-                out IReadOnlyList<ChainedExpression> chainedExpressions);
+            Expression expressionWithoutIncludes = searchOptions.Expression;
+            IReadOnlyList<IncludeExpression> includeExpressions = Array.Empty<IncludeExpression>();
+            IReadOnlyList<IncludeExpression> revIncludeExpressions = Array.Empty<IncludeExpression>();
+            IReadOnlyList<ChainedExpression> chainedExpressions = Array.Empty<ChainedExpression>();
+
+            bool hasIncludeOrRevIncludeExpressions = searchOptions.Expression?.ExtractIncludeAndChainedExpressions(
+                out expressionWithoutIncludes,
+                out includeExpressions,
+                out revIncludeExpressions,
+                out chainedExpressions,
+                out IReadOnlyList<UnionExpression> _) ?? false;
 
             if (hasIncludeOrRevIncludeExpressions)
             {
@@ -101,16 +103,21 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search
                 _logger.LogWarning("Bad Request (ChainedExpressions)");
                 throw new BadRequestException("Chained Expressions Not Supported");
             }
-#endif
-            var filter = _queryBuilder.BuildFilterSpec(searchOptions);
 
-            _logger.LogDebug(filter.ToString());
+            var querySpec = _queryBuilder.BuildFilterSpec(searchOptions);
 
-            // TODOCJH:  Is this a candidate for yield ? revisit when we have finished includes
+            _logger.LogDebug(querySpec.Filter.ToString());
 
-            var documents = await _dataStoreConfiguration
+            var find = _dataStoreConfiguration
                 .GetCollection()
-                .Find(filter)
+                .Find(querySpec.Filter);
+
+            if (querySpec.Sort != null)
+            {
+                find = find.Sort(querySpec.Sort);
+            }
+
+            var documents = await find
                 .Limit(searchOptions.MaxItemCount)
                 .ToListAsync(cancellationToken);
 
@@ -122,14 +129,18 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search
                 resourceWrappers.Add(resourceWrapper);
             }
 
-#if SEARCH_INCLUDE_FUNCTIONALITY
-            (IList<ResourceWrapper> includes, bool includesTruncated) = await PerformIncludeQueriesAsync(temporaryResourceWrappers, includeExpressions, revIncludeExpressions, searchOptions.IncludeCount, cancellationToken);
-#endif
+            (IList<ResourceWrapper> includes, bool includesTruncated) = await PerformIncludeQueriesAsync(
+                resourceWrappers,
+                includeExpressions,
+                revIncludeExpressions,
+                searchOptions.IncludeCount,
+                cancellationToken);
+
             SearchResult searchResult = CreateSearchResult(
                 searchOptions,
-                resourceWrappers.Select(m => new SearchResultEntry(m)),
+                resourceWrappers.Select(m => new SearchResultEntry(m, SearchEntryMode.Match)).Concat(includes.Select(i => new SearchResultEntry(i, SearchEntryMode.Include))),
                 null,
-                false);
+                includesTruncated);
 
             return searchResult;
         }
@@ -175,17 +186,15 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search
             throw new NotImplementedException();
         }
 
-#if SEARCH_INCLUDE_FUNCTIONALITY
 #pragma warning disable CA1822
 #pragma warning disable CS1998
         private async Task<(IList<ResourceWrapper> includes, bool includesTruncated)> PerformIncludeQueriesAsync(
-            List<ResourceWrapper> matches,
+            List<FHIRMongoResourceWrapper> matches,
             IReadOnlyCollection<IncludeExpression> includeExpressions,
             IReadOnlyCollection<IncludeExpression> revIncludeExpressions,
             int maxIncludeCount,
             CancellationToken cancellationToken)
         {
-            // if no matches or no include/revinclude then just return empty
             if (matches.Count == 0 ||
                 (includeExpressions.Count == 0 && revIncludeExpressions.Count == 0))
             {
@@ -193,28 +202,224 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search
             }
 
             var includes = new List<ResourceWrapper>();
-
-            var matchIds = matches
-                .Select(x => new ResourceKey(x.ResourceTypeName, x.ResourceId))
-                .ToHashSet();
+            var seenIncludeKeys = new HashSet<ResourceKey>();
 
             if (includeExpressions.Count > 0)
             {
-                // fetch in the resources to include from _include parameters.
+                foreach (IncludeExpression includeExpression in includeExpressions)
+                {
+                    string code = includeExpression.ReferenceSearchParameter?.Code;
+                    if (string.IsNullOrWhiteSpace(code))
+                    {
+                        continue;
+                    }
 
-                // var referencesToInclude = matches
-                //    .SelectMany(m => m.ReferencesToInclude)
-                //    .Where(r => r.ResourceTypeName != null) // exclude untyped references to align with the current SQL behavior
-                //    .Select(x => new ResourceKey(x.ResourceTypeName, x.ResourceId))
-                //    .Distinct()
-                //    .Where(x => !matchIds.Contains(x))
-                //    .ToList();
+                    var targetTypes = includeExpression.TargetResourceType != null
+                        ? new[] { includeExpression.TargetResourceType }
+                        : includeExpression.ReferenceSearchParameter?.TargetResourceTypes?.Where(t => !string.IsNullOrWhiteSpace(t)).ToArray() ?? Array.Empty<string>();
+
+                    foreach (FHIRMongoResourceWrapper match in matches)
+                    {
+                        if (!string.Equals(match.ResourceTypeName, includeExpression.SourceResourceType, StringComparison.OrdinalIgnoreCase) &&
+                            !string.Equals(includeExpression.SourceResourceType, "*", StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        foreach ((string resourceType, string resourceId) in ExtractReferenceTargets(match, code))
+                        {
+                            if (targetTypes.Length > 0 &&
+                                !targetTypes.Contains(resourceType, StringComparer.OrdinalIgnoreCase))
+                            {
+                                continue;
+                            }
+
+                            var resourceKey = new ResourceKey(resourceType, resourceId);
+                            if (seenIncludeKeys.Contains(resourceKey))
+                            {
+                                continue;
+                            }
+
+                            ResourceWrapper resource = await _fhirDataStore.GetAsync(resourceKey, cancellationToken);
+                            if (resource == null || resource.IsDeleted)
+                            {
+                                continue;
+                            }
+
+                            includes.Add(resource);
+                            seenIncludeKeys.Add(resourceKey);
+
+                            if (includes.Count > maxIncludeCount)
+                            {
+                                return (includes, true);
+                            }
+                        }
+                    }
+                }
             }
 
-            throw new NotImplementedException();
+            if (revIncludeExpressions.Count > 0)
+            {
+                foreach (IncludeExpression revIncludeExpression in revIncludeExpressions)
+                {
+                    string code = revIncludeExpression.ReferenceSearchParameter?.Code;
+                    if (string.IsNullOrWhiteSpace(code))
+                    {
+                        continue;
+                    }
+
+                    var targetResourceTypes = revIncludeExpression.TargetResourceType != null
+                        ? new[] { revIncludeExpression.TargetResourceType }
+                        : revIncludeExpression.ReferenceSearchParameter?.TargetResourceTypes?.Where(t => !string.IsNullOrWhiteSpace(t)).ToArray() ?? Array.Empty<string>();
+
+                    if (targetResourceTypes.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    var matchResourceTypes = matches
+                        .Select(m => m.ResourceTypeName)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    var matchResourceIds = matches
+                        .Select(m => m.ResourceId)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+
+                    foreach (string targetResourceType in targetResourceTypes)
+                    {
+                        var filter = Builders<BsonDocument>.Filter.And(
+                            Builders<BsonDocument>.Filter.Eq(FieldNameConstants.ResourceType, targetResourceType),
+                            Builders<BsonDocument>.Filter.ElemMatch(
+                                FieldNameConstants.SearchIndexes,
+                                Builders<BsonDocument>.Filter.And(
+                                    Builders<BsonDocument>.Filter.Eq($"{FieldNameConstants.SearchParameter}.{FieldNameConstants.SearchParameterCode}", code),
+                                    Builders<BsonDocument>.Filter.In($"Value.{SearchValueConstants.ReferenceResourceTypeName}", matchResourceTypes),
+                                    Builders<BsonDocument>.Filter.In($"Value.{SearchValueConstants.ReferenceResourceIdName}", matchResourceIds))));
+
+                        var docs = await _dataStoreConfiguration
+                            .GetCollection()
+                            .Find(filter)
+                            .Limit(maxIncludeCount - includes.Count)
+                            .ToListAsync(cancellationToken);
+
+                        foreach (var doc in docs)
+                        {
+                            var resource = FHIRMongoResourceWrapper.FromBsonDocument(doc);
+                            if (resource == null || resource.IsDeleted)
+                            {
+                                continue;
+                            }
+
+                            var resourceKey = new ResourceKey(resource.ResourceTypeName, resource.ResourceId);
+                            if (seenIncludeKeys.Contains(resourceKey))
+                            {
+                                continue;
+                            }
+
+                            includes.Add(resource);
+                            seenIncludeKeys.Add(resourceKey);
+
+                            if (includes.Count > maxIncludeCount)
+                            {
+                                return (includes, true);
+                            }
+                        }
+                    }
+                }
+            }
+
+            return (includes, false);
+        }
+
+        private static IEnumerable<(string ResourceType, string ResourceId)> ExtractReferenceTargets(FHIRMongoResourceWrapper match, string searchParameterCode)
+        {
+            if (match?.RawResource == null || string.IsNullOrWhiteSpace(match.RawResource.Data) || string.IsNullOrWhiteSpace(searchParameterCode))
+            {
+                return Array.Empty<(string ResourceType, string ResourceId)>();
+            }
+
+            try
+            {
+                JObject resourceJson = JObject.Parse(match.RawResource.Data);
+                JToken token = resourceJson[searchParameterCode];
+                if (token == null)
+                {
+                    return Array.Empty<(string ResourceType, string ResourceId)>();
+                }
+
+                List<(string ResourceType, string ResourceId)> results = new();
+                foreach (string reference in EnumerateReferenceValues(token))
+                {
+                    if (TryParseReference(reference, out string resourceType, out string resourceId))
+                    {
+                        results.Add((resourceType, resourceId));
+                    }
+                }
+
+                return results;
+            }
+            catch (Exception)
+            {
+                return Array.Empty<(string ResourceType, string ResourceId)>();
+            }
+        }
+
+        private static IEnumerable<string> EnumerateReferenceValues(JToken token)
+        {
+            switch (token.Type)
+            {
+                case JTokenType.Array:
+                    var results = new List<string>();
+                    foreach (JToken item in token.Children())
+                    {
+                        results.AddRange(EnumerateReferenceValues(item));
+                    }
+
+                    return results;
+                case JTokenType.Object:
+                    if (token["reference"] != null)
+                    {
+                        string? reference = token["reference"]?.Value<string>();
+                        return reference is null ? Array.Empty<string>() : new[] { reference };
+                    }
+
+                    return Array.Empty<string>();
+                case JTokenType.String:
+                    string? text = token.Value<string>();
+                    return text is null ? Array.Empty<string>() : new[] { text };
+                default:
+                    return Array.Empty<string>();
+            }
+        }
+
+        private static bool TryParseReference(string reference, out string resourceType, out string resourceId)
+        {
+            resourceType = null;
+            resourceId = null;
+
+            if (string.IsNullOrWhiteSpace(reference))
+            {
+                return false;
+            }
+
+            string candidate = reference.Trim();
+            if (candidate.Contains('/', StringComparison.Ordinal))
+            {
+                string[] parts = candidate.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                if (parts.Length >= 2)
+                {
+                    resourceType = parts[^2];
+                    resourceId = parts[^1];
+                    return !string.IsNullOrWhiteSpace(resourceType) && !string.IsNullOrWhiteSpace(resourceId);
+                }
+            }
+
+            resourceId = candidate;
+            return !string.IsNullOrWhiteSpace(resourceId);
         }
 #pragma warning restore CS1998
 #pragma warning restore CA1822
-#endif
     }
 }

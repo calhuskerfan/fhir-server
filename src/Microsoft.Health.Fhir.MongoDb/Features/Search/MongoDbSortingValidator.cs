@@ -34,6 +34,15 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search
         {
             EnsureArg.IsNotNull(sorting, nameof(sorting));
 
+            foreach ((SearchParameterInfo searchParameter, SortOrder sortOrder) in sorting)
+            {
+                if (!Enum.IsDefined(sortOrder))
+                {
+                    errorMessages = [string.Format(CultureInfo.InvariantCulture, Microsoft.Health.Fhir.Core.Resources.SearchSortParameterNotSupported, searchParameter.Code)];
+                    return false;
+                }
+            }
+
             switch (sorting)
             {
                 case { Count: 0 }:

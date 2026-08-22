@@ -20,7 +20,7 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
         /// produces a MongoDb Filter Expression to be executed against the FHIR store.
         /// </summary>
         /// <param name="searchOptions">expression definition of search to parsed into MongoDb query</param>
-        /// <returns>A BsonDocument Document containing a MongoDb filter definition</returns>
-        BsonDocument BuildFilterSpec(SearchOptions searchOptions);
+        /// <returns>A MongoQuerySpec containing a MongoDb filter definition and sort definition</returns>
+        MongoQuerySpec BuildFilterSpec(SearchOptions searchOptions);
     }
 }
