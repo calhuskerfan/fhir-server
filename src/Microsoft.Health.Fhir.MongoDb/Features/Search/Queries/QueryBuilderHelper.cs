@@ -38,7 +38,7 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
 
             SortDefinition<BsonDocument> sortDefinition = null;
 
-            if (searchOptions.Sort.Any())
+            if (searchOptions.Sort?.Any() == true)
             {
                 // BUGCJH: Start With One sort, but we should support multiple sorts in the future
                 var sort = searchOptions.Sort[0];
