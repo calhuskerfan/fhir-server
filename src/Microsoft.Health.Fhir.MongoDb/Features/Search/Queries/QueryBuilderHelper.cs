@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading.Tasks;
 using EnsureThat;
 using Microsoft.Health.Fhir.Core.Features.Search;
+using Microsoft.Health.Fhir.MongoDb.Features.Storage;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
 using MongoDB.Driver;
@@ -43,9 +44,15 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
                 // BUGCJH: Start With One sort, but we should support multiple sorts in the future
                 var sort = searchOptions.Sort[0];
 
+                // $"{FieldNameConstants.SearchParameter}.{FieldNameConstants.SearchParameterCode}", expression.Parameter.Code)
+
+                /*
                 sortDefinition = sort.sortOrder == SortOrder.Ascending
-                    ? Builders<BsonDocument>.Sort.Ascending(sort.searchParameterInfo.Code)
-                    : Builders<BsonDocument>.Sort.Descending(sort.searchParameterInfo.Code);
+                    ? Builders<BsonDocument>.Sort.Ascending($"{FieldNameConstants.SearchParameter}.{FieldNameConstants.SearchParameterCode}.{sort.searchParameterInfo.Code}")
+                    : Builders<BsonDocument>.Sort.Descending($"{FieldNameConstants.SearchParameter}.{FieldNameConstants.SearchParameterCode}.{sort.searchParameterInfo.Code}");
+
+                sortDefinition = Builders<BsonDocument>.Sort.Descending(a => a[FieldNameConstants.SearchParameter][FieldNameConstants.SearchParameterCode][sort.searchParameterInfo.Code]);
+                */
             }
 
             return new MongoQuerySpec(filters, sortDefinition);

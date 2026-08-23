@@ -28,6 +28,7 @@ using Microsoft.Health.Fhir.MongoDb.Features.Search.Expressions;
 using Microsoft.Health.Fhir.MongoDb.Features.Search.Queries;
 using Microsoft.Health.Fhir.MongoDb.Features.Storage;
 using Microsoft.Health.Fhir.MongoDb.Features.Storage.Queues;
+using Microsoft.Health.Fhir.MongoDb.Features.Storage.Registry;
 using Microsoft.Health.JobManagement;
 using QueryBuilder = Microsoft.Health.Fhir.MongoDb.Features.Search.Queries.QueryBuilder;
 
@@ -83,10 +84,20 @@ namespace Microsoft.Extensions.DependencyInjection
                 .AsSelf()
                 .AsImplementedInterfaces();
 
+            services.Add<MongoDbSearchParameterStatusDataStore>()
+                .Transient()
+                .AsSelf()
+                .ReplaceService<ISearchParameterStatusDataStore>();
+
             services.Add<MongoDbDeletionServiceDataStoreFactory>()
                 .Scoped()
                 .AsSelf()
                 .AsImplementedInterfaces();
+
+            services.Add<MongoDbStorageInitializer>()
+                .Singleton()
+                .AsSelf()
+                .AsService<IHostedService>();
 
             services.Add<MongoDbTransactionHandler>()
                 .Scoped()

@@ -23,7 +23,7 @@ namespace Microsoft.Health.Fhir.MongoDb.UnitTests.Features.Search.Queries
     public class QueryBuilderHelperSortingTests
     {
         [Fact]
-        public void GivenAscendingSort_WhenBuildingSpec_ThenSortsBySearchParameterCodeAscending()
+        public void GivenAscendingSort_WhenBuildingSpec_ThenSortsBySearchParameterNameAscending()
         {
             SearchOptions searchOptions = CreateSearchOptions("name", SortOrder.Ascending);
 
@@ -33,13 +33,26 @@ namespace Microsoft.Health.Fhir.MongoDb.UnitTests.Features.Search.Queries
         }
 
         [Fact]
-        public void GivenDescendingSort_WhenBuildingSpec_ThenSortsBySearchParameterCodeDescending()
+        public void GivenDescendingSort_WhenBuildingSpec_ThenSortsBySearchParameterNameDescending()
         {
             SearchOptions searchOptions = CreateSearchOptions("name", SortOrder.Descending);
 
             MongoQuerySpec querySpec = new QueryBuilderHelper().BuildFilterSpec(searchOptions);
 
             Assert.Equal(new BsonDocument("name", -1), RenderSort(querySpec.Sort));
+        }
+
+        [Fact]
+        public void GivenSearchParameterWithDifferentNameAndCode_WhenBuildingSpec_ThenSortsByName()
+        {
+            var searchOptions = new SearchOptions
+            {
+                Sort = [(new SearchParameterInfo("family", "fam"), SortOrder.Ascending)],
+            };
+
+            MongoQuerySpec querySpec = new QueryBuilderHelper().BuildFilterSpec(searchOptions);
+
+            Assert.Equal(new BsonDocument("family", 1), RenderSort(querySpec.Sort));
         }
 
         [Fact]
