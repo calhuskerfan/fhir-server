@@ -35,6 +35,12 @@ namespace Microsoft.Health.Fhir.Core.Configs
         public TotalType IncludeTotalInBundle { get; set; } = TotalType.None;
 
         /// <summary>
+        /// Gets or sets the preferred FHIR SDK at feature seams that support provider selection.
+        /// Firely remains the default until the final migration cutover.
+        /// </summary>
+        public FhirSdkProvider FhirSdkProvider { get; set; } = FhirSdkProvider.Firely;
+
+        /// <summary>
         /// Gets or sets the maximum value for _count in search.
         /// </summary>
         public int MaxItemCountPerSearch { get; set; } = 1000;
@@ -174,5 +180,10 @@ namespace Microsoft.Health.Fhir.Core.Configs
         /// Gets or sets a value indicating whether SMART system scope authorization is enforced for Bulk Export.
         /// </summary>
         public bool EnableSmartExportScopeAuthorization { get; set; } = true;
+
+        /// <summary>
+        /// Gets or sets a value indicating the runtime state of the FHIR server.
+        /// </summary>
+        public string RuntimeState { get; set; }
     }
 }
