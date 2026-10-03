@@ -84,5 +84,10 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage.Queues
         {
             throw new NotImplementedException();
         }
+
+        public Task<JobInfo> GetMostRecentJobByQueueTypeAsync(byte queueType, CancellationToken cancellationToken)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

@@ -34,7 +34,7 @@ namespace Microsoft.Health.Fhir.MongoDb.UnitTests.Extensions
         {
             var dataStore = CreateDataStore();
 
-            MergeOutcome mergeOutcome = await ((IFhirDataStore)dataStore).MergeAsync(Array.Empty<ResourceWrapperOperation>(), CancellationToken.None);
+            MergeOutcome mergeOutcome = await dataStore.MergeAsync(Array.Empty<ResourceWrapperOperation>(), CancellationToken.None);
 
             Assert.NotNull(mergeOutcome);
             Assert.Equal(MergeOutcomeFinalState.Unchanged, mergeOutcome.State);
@@ -96,9 +96,14 @@ namespace Microsoft.Health.Fhir.MongoDb.UnitTests.Extensions
             var requestContextAccessor = Substitute.For<RequestContextAccessor<IFhirRequestContext>>();
             var bundleOrchestrator = Substitute.For<IBundleOrchestrator>();
             var coreFeatures = Options.Create(new CoreFeatureConfiguration());
-            var config = new MongoDataStoreConfiguration();
 
-            return new MongoFhirDataStore(logger, requestContextAccessor, bundleOrchestrator, coreFeatures, config);
+            return new MongoFhirDataStore(
+                logger,
+                requestContextAccessor,
+                bundleOrchestrator,
+                coreFeatures,
+                new MongoDataStoreConfiguration(),
+                new StorageDocumentBuilder());
         }
     }
 }

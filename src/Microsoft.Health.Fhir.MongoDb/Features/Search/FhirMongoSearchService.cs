@@ -180,7 +180,7 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search
             return searchResult;
         }
 
-        protected override Task<SearchResult> SearchForReindexInternalAsync(SearchOptions searchOptions, string searchParameterHash, CancellationToken cancellationToken)
+        public override async Task<SearchResult> SearchForReindexInternalAsync(SearchOptions searchOptions, string searchParameterHash, CancellationToken cancellationToken)
         {
             _logger.LogInformation("SearchForReindexInternalAsync");
             throw new NotImplementedException();

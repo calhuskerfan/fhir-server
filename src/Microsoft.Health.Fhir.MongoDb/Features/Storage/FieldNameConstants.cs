@@ -21,6 +21,7 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
         public const string IsLatest = "isLatest";
         public const string LastModified = "lastModified";
         public const string SearchIndexes = "searchIndexes";
+        public const string SearchParameterHash = "searchParameterHash";
         public const string SearchParameter = "SearchParameter";
         public const string SearchParameterCode = "Code";
     }

@@ -35,42 +35,18 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
 
             if (searchOptions.Sort?.Any() == true)
             {
-                // BUGCJH: Start With One sort, but we should support multiple sorts in the future
+                // Only the first sort is emitted for the current MongoDB implementation.
                 var sort = searchOptions.Sort[0];
+                var sortFieldName = sort.searchParameterInfo?.Name;
 
-                if (sort.searchParameterInfo.Name == SearchParameterNames.LastUpdated)
+                if (string.IsNullOrEmpty(sortFieldName))
                 {
-                    sortDefinition = sort.sortOrder == SortOrder.Ascending
-                    ? Builders<BsonDocument>.Sort.Ascending($"{FieldNameConstants.LastModified}")
-                    : Builders<BsonDocument>.Sort.Descending($"{FieldNameConstants.LastModified}");
+                    return new MongoQuerySpec(filters, null);
                 }
 
-                // so this is where it starts to suck, becuase we either go to aggregation, or we need to start mapping.  for now I am going
-                // to go one by one and do the sorting on the resource itself and not the searchparamaters
-                // lets just make a little progress and then come back
-                // we could actually 'chop' the Expression to get a little bit of a head start
-                if (sort.searchParameterInfo.Name == "family")
-                {
-                    sortDefinition = sort.sortOrder == SortOrder.Ascending
-                    ? Builders<BsonDocument>.Sort.Ascending($"resource.name.{sort.searchParameterInfo.Name}")
-                    : Builders<BsonDocument>.Sort.Descending($"resource.name.{sort.searchParameterInfo.Name}");
-                }
-
-                if (sort.searchParameterInfo.Name == "birthdate")
-                {
-                    sortDefinition = sort.sortOrder == SortOrder.Ascending
-                    ? Builders<BsonDocument>.Sort.Ascending($"resource.birthdate.{sort.searchParameterInfo.Name}")
-                    : Builders<BsonDocument>.Sort.Descending($"resource.birthdate.{sort.searchParameterInfo.Name}");
-                }
-
-                /*
-                if (sort.searchParameterInfo.Name == "birthdate")
-                {
-                    sortDefinition = sort.sortOrder == SortOrder.Ascending
-                    ? Builders<BsonDocument>.Sort.Ascending($"resource.birthdate.{sort.searchParameterInfo.Name}")
-                    : Builders<BsonDocument>.Sort.Descending($"resource.birthdate.{sort.searchParameterInfo.Name}");
-                }
-                */
+                sortDefinition = sort.sortOrder == SortOrder.Ascending
+                    ? Builders<BsonDocument>.Sort.Ascending(sortFieldName)
+                    : Builders<BsonDocument>.Sort.Descending(sortFieldName);
             }
 
             return new MongoQuerySpec(filters, sortDefinition);

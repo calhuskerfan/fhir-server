@@ -38,11 +38,21 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
 
         public static FHIRMongoResourceWrapper FromBsonDocument(BsonDocument entry)
         {
-            var isHistory = false;
             var isRawResourceMetaSet = true;
 
-            var isDeleted = entry[FieldNameConstants.IsDeleted].ToBoolean();
-            var resourceDocument = entry[FieldNameConstants.Resource].ToBsonDocument();
+            var isHistory = entry.Contains(FieldNameConstants.IsLatest) && !entry[FieldNameConstants.IsLatest].ToBoolean();
+
+            var lastModified = entry.Contains(FieldNameConstants.LastModified) && entry[FieldNameConstants.LastModified].IsValidDateTime
+                ? new DateTimeOffset(entry[FieldNameConstants.LastModified].ToUniversalTime(), TimeSpan.Zero)
+                : DateTimeOffset.UtcNow;
+
+            if (!entry.TryGetValue(FieldNameConstants.Resource, out var resourceValue) || !resourceValue.IsBsonDocument)
+            {
+                throw new InvalidOperationException($"Stored document is missing the '{FieldNameConstants.Resource}' body.");
+            }
+
+            var isDeleted = entry.TryGetValue(FieldNameConstants.IsDeleted, out var deletedValue) && deletedValue.ToBoolean();
+            var resourceDocument = resourceValue.AsBsonDocument;
             var resourceId = entry.Contains(FieldNameConstants.ResourceId)
                 ? entry[FieldNameConstants.ResourceId].AsString
                 : resourceDocument[FieldNameConstants.Id].AsString;
@@ -51,8 +61,10 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
                 : resourceDocument[FieldNameConstants.ResourceType].AsString;
             var version = entry.Contains(FieldNameConstants.Version)
                 ? entry[FieldNameConstants.Version].ToString()
-                : "1";
-            var rawResource = entry[FieldNameConstants.Resource].ToJson();
+                : resourceDocument.TryGetValue("meta", out var meta) && meta.IsBsonDocument && meta.AsBsonDocument.TryGetValue("versionId", out var metaVersion) && metaVersion.IsString
+                    ? metaVersion.AsString
+                    : "1";
+            var rawResource = resourceDocument.ToJson();
 
             var resourceWrapper = new FHIRMongoResourceWrapper(
                 resourceId,
@@ -60,7 +72,7 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
                 resourceType,
                 new RawResource(rawResource, FhirResourceFormat.Json, isMetaSet: isRawResourceMetaSet),
                 null,
-                DateTimeOffset.Now,
+                lastModified,
                 isDeleted,
                 isHistory,
                 searchIndices: null,

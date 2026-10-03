@@ -3,22 +3,25 @@
 // Licensed under the MIT License (MIT). See LICENSE in the repo root for license information.
 // -------------------------------------------------------------------------------------------------
 
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using EnsureThat;
 using Microsoft.Health.Abstractions.Features.Transactions;
+using Microsoft.Health.Fhir.MongoDb.Configs;
 
 namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
 {
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "Pending")]
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1852:Seal internal types", Justification = "Pending")]
-    internal class MongoDbTransactionHandler : ITransactionHandler
+    internal sealed class MongoDbTransactionHandler : ITransactionHandler
     {
+        private readonly MongoDataStoreConfiguration _configuration;
+
+        public MongoDbTransactionHandler(MongoDataStoreConfiguration configuration)
+        {
+            EnsureArg.IsNotNull(configuration, nameof(configuration));
+            _configuration = configuration;
+        }
+
         public ITransactionScope BeginTransaction()
         {
-            return new MongoDbTransactionScope();
+            return new MongoDbTransactionScope(_configuration.GetClient().StartSession());
         }
 
         public void Dispose()

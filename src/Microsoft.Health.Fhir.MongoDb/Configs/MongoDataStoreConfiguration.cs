@@ -10,10 +10,14 @@ using MongoDB.Driver;
 
 namespace Microsoft.Health.Fhir.MongoDb.Configs
 {
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001:Types that own disposable fields should be disposable", Justification = "The MongoClient is intentionally shared for the process lifetime.")]
     public class MongoDataStoreConfiguration
     {
         private readonly string _collectionName = "resource";
         private readonly string _databaseName = "fhir";
+        private readonly object _clientLock = new object();
+        private IMongoClient? _client;
+        private string? _clientConnectionString;
 
         public string? ConnectionString { get; set; }
 
@@ -27,15 +31,30 @@ namespace Microsoft.Health.Fhir.MongoDb.Configs
 
             string collectionName = _collectionName;
 
-            var connectionString = ConnectionString;
-
-            var client = new MongoClient(connectionString);
-
-            var collection = client
+            return GetClient()
                 .GetDatabase(_databaseName)
                 .GetCollection<BsonDocument>(collectionName.ToLowerInvariant());
+        }
 
-            return collection;
+        /// <summary>
+        /// Gets the shared client. Sessions and the collections they write to must come from the same client.
+        /// </summary>
+        /// <returns>The shared <see cref="IMongoClient"/>.</returns>
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1024:Use properties where appropriate", Justification = "Lazily creates the client.")]
+        public IMongoClient GetClient()
+        {
+            var connectionString = ConnectionString;
+
+            lock (_clientLock)
+            {
+                if (_client == null || _clientConnectionString != connectionString)
+                {
+                    _client = new MongoClient(connectionString);
+                    _clientConnectionString = connectionString;
+                }
+
+                return _client;
+            }
         }
     }
 }

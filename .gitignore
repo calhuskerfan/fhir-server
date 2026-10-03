@@ -317,10 +317,10 @@ __*
 .local/
 
 
-
-################################## START DO NOT MERGE CALHUSKERFAN
+################################## START DO NOT MERGE CALHUSKERFAN ##################################
 *.user.md
 *.user.ps1
 *.user.slnf
-.user/*
-################################## END DO NOT MERGE CALHUSKERFAN
+.user
+.archive
+################################## END DO NOT MERGE CALHUSKERFAN ##################################
