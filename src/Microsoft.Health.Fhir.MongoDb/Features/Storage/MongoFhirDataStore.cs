@@ -14,6 +14,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Azure.Core;
 using EnsureThat;
+using Hl7.Fhir.Model;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Health.Core.Features.Context;
@@ -45,18 +46,21 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
         private readonly IBundleOrchestrator _bundleOrchestrator;
         private readonly MongoDataStoreConfiguration _dataStoreConfiguration;
         private readonly CoreFeatureConfiguration _coreFeatures;
+        private readonly IStorageDocumentBuilder _storageDocumentBuilder;
 
         public MongoFhirDataStore(
             ILogger<MongoFhirDataStore> logger,
             RequestContextAccessor<IFhirRequestContext> requestContextAccessor,
             IBundleOrchestrator bundleOrchestrator,
             IOptions<CoreFeatureConfiguration> coreFeatures,
-            MongoDataStoreConfiguration dataStoreConfiguration)
+            MongoDataStoreConfiguration dataStoreConfiguration,
+            IStorageDocumentBuilder storageDocumentBuilder)
         {
             EnsureArg.IsNotNull(logger, nameof(logger));
             EnsureArg.IsNotNull(coreFeatures, nameof(coreFeatures));
             EnsureArg.IsNotNull(bundleOrchestrator, nameof(bundleOrchestrator));
             EnsureArg.IsNotNull(requestContextAccessor, nameof(requestContextAccessor));
+            EnsureArg.IsNotNull(storageDocumentBuilder, nameof(storageDocumentBuilder));
             EnsureArg.IsNotNull(dataStoreConfiguration, nameof(dataStoreConfiguration));
 
             _logger = logger;
@@ -64,6 +68,7 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
             _bundleOrchestrator = bundleOrchestrator;
             _dataStoreConfiguration = dataStoreConfiguration;
             _coreFeatures = coreFeatures.Value;
+            _storageDocumentBuilder = storageDocumentBuilder;
         }
 
         public Task BulkUpdateSearchParameterIndicesAsync(IReadOnlyCollection<ResourceWrapper> resources, CancellationToken cancellationToken)
@@ -218,8 +223,8 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
 
                 existingResources.TryGetValue(resource.ToResourceKey(true), out var existingResource);
 
-                var currentVersion = existingResource == null ? 1 : GetNextVersion(existingResource);
-                var versionId = currentVersion.ToString(CultureInfo.InvariantCulture);
+                var nextVersion = existingResource == null ? 1 : GetNextVersion(existingResource);
+                var versionId = nextVersion.ToString(CultureInfo.InvariantCulture);
 
                 var previousLatestFilter = Builders<BsonDocument>
                     .Filter
@@ -236,19 +241,12 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
                 // ok, lets update the meta-data
                 // TODOCJH:  Feels like we are duplicating here, but the metadata is natively sent in the response
                 // where as the storage wrapper, version, property is not.
-                var resourceDocument = UpdateResourceMetadata(JObject.Parse(resourceExt.Wrapper.RawResource.Data), resourceExt.Wrapper, versionId);
+                var resourceDocument = UpdateResourceMetadata(
+                    JObject.Parse(resourceExt.Wrapper.RawResource.Data),
+                    resourceExt.Wrapper,
+                    versionId);
 
-                var doc = new BsonDocument
-                {
-                    { FieldNameConstants.ResourceId, new BsonString(resource.ResourceId) },
-                    { FieldNameConstants.ResourceType, new BsonString(resource.ResourceTypeName) },
-                    { FieldNameConstants.Version, new BsonString(versionId) },
-                    { FieldNameConstants.IsLatest, true },
-                    { FieldNameConstants.IsDeleted, resourceExt.Wrapper.IsDeleted },
-                    { FieldNameConstants.LastModified, new BsonDateTime(resource.LastModified.ToUniversalTime().UtcDateTime) },
-                    { FieldNameConstants.Resource, resourceDocument.ToBsonDocument() },
-                    { FieldNameConstants.SearchIndexes, GetSearchIndexes(resourceExt.Wrapper.SearchIndices) },
-                };
+                var doc = BuildStorageDocument(resource, versionId, resourceExt, resourceDocument);
 
                 await _dataStoreConfiguration
                     .GetCollection()
@@ -260,6 +258,18 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
             }
 
             return results;
+        }
+
+        // set up to build the document to be stored in the database with DI so that we can
+        // experiment with different storage document builders if we want to change the way we store the data in the future.
+        // and align on search and sort.
+        private BsonDocument BuildStorageDocument(
+            ResourceWrapper resource,
+            string versionId,
+            ResourceWrapperOperation resourceExt,
+            JObject resourceDocument)
+        {
+            return new StorageDocumentBuilder().BuildStorageDocument(resource, versionId, resourceExt, resourceDocument);
         }
 
         private static int GetNextVersion(ResourceWrapper existingResource)
@@ -274,7 +284,10 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
                 : 1;
         }
 
-        internal static JObject UpdateResourceMetadata(JObject resource, ResourceWrapper wrapper, string versionId)
+        internal static JObject UpdateResourceMetadata(
+            JObject resource,
+            ResourceWrapper wrapper,
+            string versionId)
         {
             if (resource == null || wrapper == null)
             {
@@ -294,18 +307,6 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
             return resource;
         }
 
-        private BsonArray GetSearchIndexes(IReadOnlyCollection<SearchIndexEntry> searchIndices)
-        {
-            BsonArray indexes = new BsonArray();
-
-            foreach (SearchIndexEntry entry in searchIndices)
-            {
-                indexes.Add(SearchIndexEntryBsonDocumentGenerator.Generate(entry));
-            }
-
-            return indexes;
-        }
-
         /// <summary>
         /// we can land here on a 'POST' a 'PUT' and 'DELETE'
         /// </summary>
@@ -313,7 +314,9 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage
         /// <param name="cancellationToken">cancellation token</param>
         /// <returns>UpsertOutcome</returns>
         /// <exception cref="NotImplementedException">bundle operation not supported</exception>
-        public async Task<UpsertOutcome> UpsertAsync(ResourceWrapperOperation resource, CancellationToken cancellationToken)
+        public async Task<UpsertOutcome> UpsertAsync(
+            ResourceWrapperOperation resource,
+            CancellationToken cancellationToken)
         {
             bool isBundleParallelOperation =
                 _bundleOrchestrator.IsEnabled &&

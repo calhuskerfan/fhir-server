@@ -21,6 +21,6 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search.Queries
         /// </summary>
         /// <param name="searchOptions">expression definition of search to parsed into MongoDb query</param>
         /// <returns>A MongoQuerySpec containing a MongoDb filter definition and sort definition</returns>
-        MongoQuerySpec BuildFilterSpec(SearchOptions searchOptions);
+        MongoQuerySpec BuildQuerySpec(SearchOptions searchOptions);
     }
 }

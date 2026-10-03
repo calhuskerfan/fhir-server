@@ -9,6 +9,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using EnsureThat;
+using Microsoft.Health.Fhir.Core.Features.Search;
 using Microsoft.Health.Fhir.Core.Features.Search.Registry;
 using Microsoft.Health.Fhir.Core.Models;
 
@@ -18,9 +19,12 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Storage.Registry
     {
         private static readonly HashSet<Uri> InitialSortParameterUris = new HashSet<Uri>
         {
+            SearchParameterNames.LastUpdatedUri,
             new Uri("http://hl7.org/fhir/SearchParameter/individual-birthdate"),
             new Uri("http://hl7.org/fhir/SearchParameter/individual-family"),
+            /*
             new Uri("http://hl7.org/fhir/SearchParameter/individual-given"),
+            */
         };
 
         private readonly FilebasedSearchParameterStatusDataStore _filebasedDataStore;

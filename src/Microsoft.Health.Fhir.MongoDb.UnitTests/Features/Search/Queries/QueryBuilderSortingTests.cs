@@ -20,14 +20,14 @@ namespace Microsoft.Health.Fhir.MongoDb.UnitTests.Features.Search.Queries
 {
     [Trait(Traits.OwningTeam, OwningTeam.Fhir)]
     [Trait(Traits.Category, Categories.Search)]
-    public class QueryBuilderHelperSortingTests
+    public class QueryBuilderSortingTests
     {
         [Fact]
         public void GivenAscendingSort_WhenBuildingSpec_ThenSortsBySearchParameterNameAscending()
         {
             SearchOptions searchOptions = CreateSearchOptions("name", SortOrder.Ascending);
 
-            MongoQuerySpec querySpec = new QueryBuilderHelper().BuildFilterSpec(searchOptions);
+            MongoQuerySpec querySpec = new QueryBuilder().BuildQuerySpec(searchOptions);
 
             Assert.Equal(new BsonDocument("name", 1), RenderSort(querySpec.Sort));
         }
@@ -37,7 +37,7 @@ namespace Microsoft.Health.Fhir.MongoDb.UnitTests.Features.Search.Queries
         {
             SearchOptions searchOptions = CreateSearchOptions("name", SortOrder.Descending);
 
-            MongoQuerySpec querySpec = new QueryBuilderHelper().BuildFilterSpec(searchOptions);
+            MongoQuerySpec querySpec = new QueryBuilder().BuildQuerySpec(searchOptions);
 
             Assert.Equal(new BsonDocument("name", -1), RenderSort(querySpec.Sort));
         }
@@ -50,7 +50,7 @@ namespace Microsoft.Health.Fhir.MongoDb.UnitTests.Features.Search.Queries
                 Sort = [(new SearchParameterInfo("family", "fam"), SortOrder.Ascending)],
             };
 
-            MongoQuerySpec querySpec = new QueryBuilderHelper().BuildFilterSpec(searchOptions);
+            MongoQuerySpec querySpec = new QueryBuilder().BuildQuerySpec(searchOptions);
 
             Assert.Equal(new BsonDocument("family", 1), RenderSort(querySpec.Sort));
         }
@@ -60,7 +60,7 @@ namespace Microsoft.Health.Fhir.MongoDb.UnitTests.Features.Search.Queries
         {
             SearchOptions searchOptions = CreateSearchOptions(KnownQueryParameterNames.LastUpdated, SortOrder.Descending);
 
-            MongoQuerySpec querySpec = new QueryBuilderHelper().BuildFilterSpec(searchOptions);
+            MongoQuerySpec querySpec = new QueryBuilder().BuildQuerySpec(searchOptions);
 
             Assert.Equal(new BsonDocument(KnownQueryParameterNames.LastUpdated, -1), RenderSort(querySpec.Sort));
         }
@@ -70,7 +70,7 @@ namespace Microsoft.Health.Fhir.MongoDb.UnitTests.Features.Search.Queries
         {
             var searchOptions = new SearchOptions();
 
-            MongoQuerySpec querySpec = new QueryBuilderHelper().BuildFilterSpec(searchOptions);
+            MongoQuerySpec querySpec = new QueryBuilder().BuildQuerySpec(searchOptions);
 
             Assert.Null(querySpec.Sort);
         }
@@ -87,7 +87,7 @@ namespace Microsoft.Health.Fhir.MongoDb.UnitTests.Features.Search.Queries
                 ],
             };
 
-            MongoQuerySpec querySpec = new QueryBuilderHelper().BuildFilterSpec(searchOptions);
+            MongoQuerySpec querySpec = new QueryBuilder().BuildQuerySpec(searchOptions);
 
             Assert.Equal(new BsonDocument("name", 1), RenderSort(querySpec.Sort));
         }
@@ -101,7 +101,7 @@ namespace Microsoft.Health.Fhir.MongoDb.UnitTests.Features.Search.Queries
                 Sort = [(new SearchParameterInfo("name", "name"), SortOrder.Ascending)],
             };
 
-            MongoQuerySpec querySpec = new QueryBuilderHelper().BuildFilterSpec(searchOptions);
+            MongoQuerySpec querySpec = new QueryBuilder().BuildQuerySpec(searchOptions);
 
             Assert.NotNull(querySpec.Filter);
             Assert.NotEmpty(querySpec.Filter);

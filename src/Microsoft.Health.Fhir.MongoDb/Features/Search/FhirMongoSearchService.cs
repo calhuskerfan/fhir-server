@@ -104,7 +104,7 @@ namespace Microsoft.Health.Fhir.MongoDb.Features.Search
                 throw new BadRequestException("Chained Expressions Not Supported");
             }
 
-            var querySpec = _queryBuilder.BuildFilterSpec(searchOptions);
+            var querySpec = _queryBuilder.BuildQuerySpec(searchOptions);
 
             _logger.LogDebug(querySpec.Filter.ToString());
 

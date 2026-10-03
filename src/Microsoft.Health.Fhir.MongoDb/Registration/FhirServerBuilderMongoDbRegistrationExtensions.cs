@@ -120,6 +120,11 @@ namespace Microsoft.Extensions.DependencyInjection
                 job.AsDelegate<Func<IJob>>();
             }
 
+            services.Add<StorageDocumentBuilder>()
+                .Scoped()
+                .AsSelf()
+                .AsImplementedInterfaces();
+
             // BUGCJH:  Investigate.
             // leave at the bottom
             // services
@@ -137,7 +142,7 @@ namespace Microsoft.Extensions.DependencyInjection
             fhirServerBuilder.Services.Add<FhirMongoSearchService>()
                 .Scoped()
                 .AsSelf()
-            .AsImplementedInterfaces();
+                .AsImplementedInterfaces();
 
             fhirServerBuilder.Services.AddSingleton<IQueryBuilder, QueryBuilder>();
 
