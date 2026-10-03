@@ -26,11 +26,9 @@ using Microsoft.Health.Fhir.Core.Features.Search.Registry;
 using Microsoft.Health.Fhir.Tests.Common;
 using Microsoft.Health.Fhir.Tests.Common.FixtureParameters;
 using Microsoft.Health.Test.Utilities;
-using Microsoft.VisualStudio.TestPlatform.Utilities;
 using Newtonsoft.Json;
 using Polly;
 using Xunit;
-using Xunit.Abstractions;
 using static Hl7.Fhir.Model.Bundle;
 using static Microsoft.EntityFrameworkCore.DbLoggerCategory;
 using Task = System.Threading.Tasks.Task;
@@ -57,7 +55,7 @@ namespace Microsoft.Health.Fhir.Tests.E2E.Rest.Reindex
             _retries = Policy.Handle<Exception>().RetryAsync(3);
         }
 
-        public async Task InitializeAsync()
+        public async ValueTask InitializeAsync()
         {
             // delete leftover resources from previous test runs
             // this guarantees that we start from clean state even on previous hard failures when we cannot rely on finally
@@ -91,9 +89,9 @@ namespace Microsoft.Health.Fhir.Tests.E2E.Rest.Reindex
             _output.WriteLine($"ReindexTests.InitializeAsync: Completed. Elapsed={(int)sw.Elapsed.TotalMilliseconds} msec.");
         }
 
-        public Task DisposeAsync()
+        public ValueTask DisposeAsync()
         {
-            return Task.CompletedTask;
+            return ValueTask.CompletedTask;
         }
 
         [Fact]
@@ -1098,6 +1096,72 @@ namespace Microsoft.Health.Fhir.Tests.E2E.Rest.Reindex
             // reindex deleted resource
             var notFoundEx = await Assert.ThrowsAsync<FhirClientException>(async () => await _fixture.TestFhirClient.ReadAsync<SearchParameter>($"SearchParameter/{code}"));
             Assert.Equal(hardDelete ? HttpStatusCode.NotFound : HttpStatusCode.Gone, notFoundEx.StatusCode);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task GivenSearchParamConditionalDeleteByUrl_ThenSuccessAndDeletedAfterReindex(bool hardDelete)
+        {
+            var code = $"conditional-delete-by-url-{(hardDelete ? "hard" : "soft")}";
+            var searchParam = CreatePersonSearchParam(code, $"http://reindex/{code}");
+            var create = await _fixture.TestFhirClient.UpdateAsync(searchParam);
+            Assert.True(create.StatusCode == HttpStatusCode.OK || create.StatusCode == HttpStatusCode.Created);
+            Assert.Equal(code, create.Resource.Id);
+
+            var delete = await _fixture.TestFhirClient.DeleteAsync($"SearchParameter?url={searchParam.Url}&hardDelete={hardDelete}");
+            Assert.Equal(HttpStatusCode.NoContent, delete.StatusCode);
+
+            var resource = await _fixture.TestFhirClient.ReadAsync<SearchParameter>($"SearchParameter/{code}");
+            Assert.NotNull(resource?.Resource);
+
+            var reindex = await _fixture.TestFhirClient.PostReindexJobAsync(new Parameters { Parameter = [] });
+            Assert.Equal(HttpStatusCode.Created, reindex.reponse.Response.StatusCode);
+            var reindexStatus = await WaitForJobCompletionAsync(reindex.uri, TimeSpan.FromSeconds(300));
+            Assert.Equal(OperationStatus.Completed, reindexStatus.Status);
+
+            var notFoundEx = await Assert.ThrowsAsync<FhirClientException>(async () => await _fixture.TestFhirClient.ReadAsync<SearchParameter>($"SearchParameter/{code}"));
+            Assert.Equal(hardDelete ? HttpStatusCode.NotFound : HttpStatusCode.Gone, notFoundEx.StatusCode);
+        }
+
+        [Theory]
+        [InlineData(false)]
+        [InlineData(true)]
+        public async Task GivenSearchParamConditionalDeleteByMultipleUrlsWithCount_ThenSuccessAndDeletedAfterReindex(bool hardDelete)
+        {
+            var code1 = $"conditional-delete-by-url-1-{(hardDelete ? "hard" : "soft")}";
+            var searchParam1 = CreatePersonSearchParam(code1, $"http://reindex/{code1}");
+            var create1 = await _fixture.TestFhirClient.UpdateAsync(searchParam1);
+            Assert.True(create1.StatusCode == HttpStatusCode.OK || create1.StatusCode == HttpStatusCode.Created);
+            Assert.Equal(code1, create1.Resource.Id);
+
+            var code2 = $"conditional-delete-by-url-2-{(hardDelete ? "hard" : "soft")}";
+            var searchParam2 = CreatePersonSearchParam(code2, $"http://reindex/{code2}");
+            var create2 = await _fixture.TestFhirClient.UpdateAsync(searchParam2);
+            Assert.True(create2.StatusCode == HttpStatusCode.OK || create2.StatusCode == HttpStatusCode.Created);
+            Assert.Equal(code2, create2.Resource.Id);
+
+            var delete = await _fixture.TestFhirClient.DeleteAsync($"SearchParameter?url={searchParam1.Url},{searchParam2.Url}&_count=2&hardDelete={hardDelete}");
+            Assert.Equal(HttpStatusCode.NoContent, delete.StatusCode);
+
+            var resource1 = await _fixture.TestFhirClient.ReadAsync<SearchParameter>($"SearchParameter/{code1}");
+            Assert.NotNull(resource1?.Resource);
+
+            var resource2 = await _fixture.TestFhirClient.ReadAsync<SearchParameter>($"SearchParameter/{code2}");
+            Assert.NotNull(resource2?.Resource);
+
+            var reindex = await _fixture.TestFhirClient.PostReindexJobAsync(new Parameters { Parameter = [] });
+            Assert.Equal(HttpStatusCode.Created, reindex.reponse.Response.StatusCode);
+            var reindexStatus = await WaitForJobCompletionAsync(reindex.uri, TimeSpan.FromSeconds(300));
+            Assert.Equal(OperationStatus.Completed, reindexStatus.Status);
+
+            var expectedStatusCode = hardDelete ? HttpStatusCode.NotFound : HttpStatusCode.Gone;
+
+            var notFoundEx1 = await Assert.ThrowsAsync<FhirClientException>(async () => await _fixture.TestFhirClient.ReadAsync<SearchParameter>($"SearchParameter/{code1}"));
+            Assert.Equal(expectedStatusCode, notFoundEx1.StatusCode);
+
+            var notFoundEx2 = await Assert.ThrowsAsync<FhirClientException>(async () => await _fixture.TestFhirClient.ReadAsync<SearchParameter>($"SearchParameter/{code2}"));
+            Assert.Equal(expectedStatusCode, notFoundEx2.StatusCode);
         }
 
         [Theory]
