@@ -620,7 +620,7 @@ namespace Microsoft.Health.Fhir.Core {
         }
         
         /// <summary>
-        ///   Looks up a localized string similar to Id must be any combination of upper or lower case ASCII letters (&apos;A&apos;..&apos;Z&apos;, and &apos;a&apos;..&apos;z&apos;), numerals (&apos;0&apos;..&apos;9&apos;), &apos;-&apos; and &apos;.&apos;, with a length limit of 64 characters. (This might be an integer, an un-prefixed OID, UUID, or any other identifier pattern that meets these constraints.).
+        ///   Looks up a localized string similar to Id must be any combination of upper or lower case ASCII letters (&apos;A&apos;..&apos;Z&apos;, and &apos;a&apos;..&apos;z&apos;), numerals (&apos;0&apos;..&apos;9&apos;), &apos;-&apos; and &apos;.&apos;, with a length limit of {0} characters. (This might be an integer, an un-prefixed OID, UUID, or any other identifier pattern that meets these constraints.).
         /// </summary>
         internal static string IdRequirements {
             get {
@@ -1872,6 +1872,15 @@ namespace Microsoft.Health.Fhir.Core {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to The granted SMART scope restricts access using the search parameter &apos;{0}&apos;, which is not currently available on this server. The request cannot be authorized..
+        /// </summary>
+        internal static string SmartScopeSearchParameterNotEnforceable {
+            get {
+                return ResourceManager.GetString("SmartScopeSearchParameterNotEnforceable", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to The _sort parameter is not supported..
         /// </summary>
         internal static string SortNotSupported {
@@ -1926,6 +1935,15 @@ namespace Microsoft.Health.Fhir.Core {
         }
         
         /// <summary>
+        ///   Looks up a localized string similar to The request was not completed because another entry in the transaction failed. Review the other entries in the bundle for the original error..
+        /// </summary>
+        internal static string TransactionEntryFailedDependency {
+            get {
+                return ResourceManager.GetString("TransactionEntryFailedDependency", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   Looks up a localized string similar to Include result was truncated.
         /// </summary>
         internal static string TruncatedIncludeMessage {
@@ -1952,6 +1970,15 @@ namespace Microsoft.Health.Fhir.Core {
             }
         }
         
+        /// <summary>
+        ///   Looks up a localized string similar to Included resources of type &apos;{0}&apos; were excluded because the caller does not have the required SMART export permissions for this resource type..
+        /// </summary>
+        internal static string ExportUnauthorizedIncludesOmitted {
+            get {
+                return ResourceManager.GetString("ExportUnauthorizedIncludesOmitted", resourceCulture);
+            }
+        }
+
         /// <summary>
         ///   Looks up a localized string similar to The _typeFilter segment &apos;{0}&apos; could not be parsed..
         /// </summary>
@@ -2147,6 +2174,142 @@ namespace Microsoft.Health.Fhir.Core {
         internal static string WeakETagFormatRequired {
             get {
                 return ResourceManager.GetString("WeakETagFormatRequired", resourceCulture);
+            }
+        }
+
+        /// <summary>
+        ///   Looks up a localized string similar to The FHIR package was rejected. Nothing from the package was installed..
+        /// </summary>
+        internal static string FhirPackageRejected {
+            get {
+                return ResourceManager.GetString("FhirPackageRejected", resourceCulture);
+            }
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The expected package integrity must be a single sha512 Subresource Integrity value, as reported in npm &apos;dist.integrity&apos;..
+        /// </summary>
+        internal static string FhirPackageIntegrityInvalid {
+            get {
+                return ResourceManager.GetString("FhirPackageIntegrityInvalid", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The package archive doesn&apos;t match its expected sha512 integrity..
+        /// </summary>
+        internal static string FhirPackageIntegrityMismatch {
+            get {
+                return ResourceManager.GetString("FhirPackageIntegrityMismatch", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The package archive is larger than the {0}-byte limit..
+        /// </summary>
+        internal static string FhirPackageCompressedSizeExceeded {
+            get {
+                return ResourceManager.GetString("FhirPackageCompressedSizeExceeded", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The package archive was rejected: {0}..
+        /// </summary>
+        internal static string FhirPackageArchiveRejected {
+            get {
+                return ResourceManager.GetString("FhirPackageArchiveRejected", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to  at archive entry {0}.
+        /// </summary>
+        internal static string FhirPackageArchiveEntryDetail {
+            get {
+                return ResourceManager.GetString("FhirPackageArchiveEntryDetail", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to  (limit {0}).
+        /// </summary>
+        internal static string FhirPackageArchiveLimitDetail {
+            get {
+                return ResourceManager.GetString("FhirPackageArchiveLimitDetail", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The package archive expands to {0} bytes from {1} compressed bytes, which exceeds the {2}:1 expansion limit..
+        /// </summary>
+        internal static string FhirPackageExpansionRatioExceeded {
+            get {
+                return ResourceManager.GetString("FhirPackageExpansionRatioExceeded", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The package manifest declares &apos;{0}&apos; version &apos;{1}&apos;, but &apos;{2}&apos; version &apos;{3}&apos; was expected..
+        /// </summary>
+        internal static string FhirPackageIdentityMismatch {
+            get {
+                return ResourceManager.GetString("FhirPackageIdentityMismatch", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The package declares FHIR version &apos;{0}&apos;, but this server supports only FHIR version &apos;{1}&apos;..
+        /// </summary>
+        internal static string FhirPackageFhirVersionMismatch {
+            get {
+                return ResourceManager.GetString("FhirPackageFhirVersionMismatch", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The package doesn&apos;t declare a dependency on &apos;{0}&apos;. Packages for this server must depend on &apos;{0}&apos; version &apos;{1}&apos;..
+        /// </summary>
+        internal static string FhirPackageCoreDependencyMissing {
+            get {
+                return ResourceManager.GetString("FhirPackageCoreDependencyMissing", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The package depends on &apos;{0}&apos; version &apos;{1}&apos;, but this server supports only &apos;{2}&apos; version &apos;{3}&apos;..
+        /// </summary>
+        internal static string FhirPackageCoreDependencyMismatch {
+            get {
+                return ResourceManager.GetString("FhirPackageCoreDependencyMismatch", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   Looks up a localized string similar to The package manifest is not valid: {0}.
+        /// </summary>
+        internal static string FhirPackageManifestInvalid {
+            get {
+                return ResourceManager.GetString("FhirPackageManifestInvalid", resourceCulture);
             }
         }
     }
